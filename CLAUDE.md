@@ -31,7 +31,12 @@ not a general assistant. Single turn only for now; no multi-turn.
 ## Domain
 
 Device protection insurance (phones, laptops, tablets, watches).
-Ten perils, defined in `data/kb/04_perils.md`.
+Eleven perils, listed as `PERILS` in `data/components.py`. Those labels are ours, internal to
+this project; `data/kb/04_perils.md` describes the same incident types in customer-facing
+language and carries no such labels. Ten of them are covered perils. The eleventh, `software`,
+corresponds to the app / OS / virus / account line in that file's not-covered list; it is
+included because software problems are a common real inquiry, and without them `tech_support`
+would never be the answer for any task.
 
 Each task must let the reward check four things the real system cares about:
 what the customer said, which peril it is, what info is still missing, and whether the reply
@@ -43,18 +48,38 @@ Components are fixed lists; a script samples one value from each and only then a
 to write the customer sentence in that style. This keeps the peril distribution balanced.
 
 ```python
-perils           = ["crack", "drop", "liquid", "surge", "battery", "malfunction", "wear", "environment", "loss", "theft"]
+perils           = ["crack", "drop", "liquid", "surge", "battery", "malfunction", "wear", "environment", "loss", "theft", "software"]
 devices          = ["phone", "laptop", "tablet", "watch"]
 tones            = ["terse", "frustrated", "normal", "rambling"]
 typos            = [True, False]
-volunteered_info = ["nothing", "device_only", "device_and_date", "device_date_and_cause"]
+customer_states  = [(["device", "peril"], 50),          # (stated facts, weight)
+                    (["device"], 25),
+                    (["peril"], 15),
+                    ([], 10)]
 ```
 
 - `terse` = short fragments ("screen broke. covered?"). `rambling` = long, includes unnecessary detail.
-- `account` is always present in every task, independent of `volunteered_info`: it is what the
-  system knows about the customer, not what the customer says.
+- `account` is what the system knows about the customer at the time of the message, not what
+  the customer says. An account can have several devices enrolled, so the system does not know
+  which device the message is about until the customer names it.
+  - When `device` is null, `account` is an empty object `{}` — not a
+    reduced set of fields, empty. Rule 1 settles those tasks before any other rule is read, so
+    no account field takes part in the answer. Any field left in would only invite the model to
+    decide instead of asking, and would leak the device category.
+  - When `device` is stated but `peril` is null, `account` keeps every field. A real agent sees
+    the account the moment the customer names the device, and the point of these tasks is that
+    the model holds off and asks what happened even with a waiting-period or claim-limit number
+    in front of it.
 
-Target: 200 tasks, 20 per peril. Customer messages should read like real people
+Target: 400 tasks. A cell is one customer_states outcome × one peril (4 × 11 = 44 cells).
+Cell sizes differ because customer_states is weighted, so the split is proportional stratified:
+the same fraction (80% / 10% / 10%) is taken from every cell, so train, val, and test all have
+the same distribution as the whole set.
+- `tasks_train.jsonl` (320): GRPO training.
+- `tasks_val.jsonl` (40): for checking after a rubric change and re-run. May be looked at many times.
+- `tasks_test.jsonl` (40): looked at once, at the end. The before/after numbers come from here.
+
+Customer messages should read like real people
 (typos, missing grammar, emotion), e.g. "It's broken. Can't see nothing. The screen is black."
 Do not always state the peril plainly; some messages should require inferring it.
 
@@ -62,41 +87,174 @@ Do not always state the peril plainly; some messages should require inferring it
 - Sentence style: normal support-ticket tone, starts like "Hi, ..." — no dramatic openers.
   This applies to `normal`, `frustrated`, and `rambling` only; `terse` is the exception.
 
-`known_facts` and `missing_info` are filled by code from the `volunteered_info` value, not by the LLM.
-Rubric items come from a per-peril template plus items that depend on `volunteered_info`
-(e.g. "does not re-ask stated info", "asks for the missing X").
+A task record stores `device` and `peril` as `null` when the customer did not identify them.
+`null` means the customer never said it, not a hidden truth the grader knows. Customers do not
+follow an order: they may say what happened without naming the device ("it got wet, is that
+covered?" leaves `device` null and `peril` set). Nothing downstream needs the unstated value:
+route rule 1 settles those tasks before any other rule reads a field.
 
-### Task record format (`data/tasks.jsonl`, one JSON object per line)
+A field is null exactly when the customer's message does not contain that fact, and carries its
+value exactly when the message does. The two must always agree: if the sentence says the device
+got wet, `peril` is `"liquid"`, not null.
+
+The generator draws a real device and a real peril in step 1, because the customer sentence
+cannot be written without them. It then decides which of the two the customer states, and from
+that point the two values are treated differently:
+- The stated fact keeps its value. It is in the sentence, so it is in the record.
+- The unstated fact is given to the sentence writer only so that the sentence can avoid naming
+  it, and is then discarded. Only this one is discarded, and it must not reach the record, the
+  prompt, or the grader.
+
+Worked example: device = watch, peril = liquid, the customer states the peril only.
+- The sentence writer is told the device is a watch so it can avoid naming it, and is told to
+  state the liquid damage.
+- The record stores `device: null`, `peril: "liquid"`.
+- `watch` is discarded; `liquid` is kept.
+
+Rubric items are assembled by code from the fields that are not null; see the assembly rules
+under Reward.
+
+### Distribution
+Most components are sampled uniformly at random. There are two exceptions, and they are
+different in kind:
+- `customer_states` is a weighted list: every outcome carries a weight next to it.
+  Uniform sampling over the four combinations would make 75% of tasks `ask_question`, so the
+  model would mostly
+  learn to ask back and real policy decisions would appear in only 25% of tasks; the weights
+  bring `ask_question` to about 50%.
+- `claims_last_12m` is not a list but a rule: its range depends on another component, the
+  device, and within that range the draw is weighted toward 0. See Sampling order below.
+
+There is no separate trap-ratio parameter. The intended distribution lives in the component
+definitions themselves, so changing a distribution means editing a weighted list or the
+sampling rule in components.py.
+
+A "trap" is simply a task whose `route_answer` is not `file_claim` — a policy explanation, a
+referral, an escalation, or a case that needs more information (`ask_question`). Traps are
+never shown to the policy model; they follow from `account`, `peril`, and `device`.
+
+### Sampling order
+Some components constrain the range of others, so they are not all drawn at once:
+- step 1: `device`, `enrolled_days_ago`, `peril`, `tone`, `typos`, `device_price_tier`, and
+  which of `device` and `peril` the customer states
+- step 2: `claims_last_12m`
+
+`claims_last_12m` is drawn last because its range depends on the two fields above it.
+This replaces the fixed list it used before.
+- `claims_last_12m` is 0 when the device is inside the waiting period — see Account consistency.
+- otherwise draw from 0 up to that device's limit (phone 0-3, laptop / tablet / watch 0-2)
+- weight the draw so 0 comes up more often, keeping at-limit tasks a minority
+
+What this does not exclude. Situations that are real but not covered must still be generated,
+because they are the gold cases for several routes:
+- watch + loss, tablet + theft → `explain_not_covered`
+- device under one year old + malfunction / wear / environment → `refer_to_manufacturer`
+- any peril + `enrolled_days_ago` < 31 → `explain_waiting_period`
+
+Only impossible account states are excluded, never uncovered situations.
+
+### Account consistency
+Account fields are sampled independently, so some combinations are impossible and must be
+corrected after sampling:
+- If `enrolled_days_ago` < 31, `claims_last_12m` is set to 0. Coverage does not start until
+  day 31, so no claim can exist yet.
+
+generate_tasks.py applies these corrections right after sampling, before computing route_answer.
+Sampling components independently can produce other impossible combinations later, so
+generate_tasks.py also ends with a check pass over the generated 400 tasks that counts and
+prints any rule violations.
+
+### route_answer rule
+Code sets `route_answer` by checking the rules top to bottom. The first match wins and the
+remaining rules are not evaluated.
+1. `device` is null or `peril` is null → `ask_question`
+   (there is no date field: the incident date is collected when the claim is actually filed,
+   and `account.enrolled_days_ago` already fixes the timing)
+2. `enrolled_days_ago` < 31 → `explain_waiting_period`
+3. peril the plan can handle neither as a claim nor through tech support
+   (e.g. loss / theft on a non-phone) → `explain_not_covered`
+   (that is the definition of the rule, not a list with an exception attached. Software
+   falls outside it: `data/kb/13_data_and_software.md` states that software problems are
+   not claims and are handled by tech support at no charge, so software has a route of its
+   own rather than being a dead end)
+4. software problem → `tech_support`
+   (`data/kb/12_tech_support.md` and `data/kb/13_data_and_software.md` both say software
+   problems are handled by tech support at no charge. Not covered by the claim process and not
+   handled at all are two different things)
+5. peril is malfunction / wear / environment and the device is still inside the manufacturer's
+   warranty (`enrolled_days_ago` < 365; warranty is 12 months from purchase and enrollment
+   happens within 30 days of purchase, so enrolled_days_ago is a close proxy) → `refer_to_manufacturer`
+6. `claims_last_12m` at or over the limit for that device → `escalate`
+   (phone 3, laptop / tablet / watch 2, per `data/kb/07_claim_limits.md`; read the limit from
+   the task's device, never hardcode 3. This sits directly above the fallback because the limit
+   only applies to claims the plan would actually take. A peril the plan does not cover, or one
+   the manufacturer is responsible for, never consumes a claim: `data/kb/07_claim_limits.md`
+   states that a denied claim does not count toward the limit. So the rules that decide whether
+   this is a plan claim at all are checked before the limit is read. Account consistency sets
+   `claims_last_12m` to 0 whenever `enrolled_days_ago` < 31, so rules 2 and 6 never both apply)
+7. otherwise → `file_claim`
+
+Why this order. Reaching the claim limit is not automatically a refusal: repeated failures on
+the same device may be a defective unit or a manufacturer warranty matter, and deciding that
+requires seeing what the earlier claims were, which the chatbot cannot do. So the case goes to
+a human. But asking for the missing device and peril comes first, because a human cannot pick
+the case up without them, and the chatbot can collect them in the turn it already has.
+Collecting information comes before deciding where a case goes. What the reply asks and how it
+is worded is not decided here; that is the rubric's job.
+
+### Task record format (`data/tasks_*.jsonl`, one JSON object per line)
 
 ```json
-{"task_id": "t007",
- "device": "laptop",
- "peril": "liquid",
- "tone": "normal",
- "typos": false,
- "volunteered_info": "device_only",
- "account": {"enrolled_days_ago": 95, "claims_last_12m": 0, "device_price_tier": "700+"},
- "goal": "how_much_will_it_cost",
- "customer": "Hi, my laptop's keyboard has stopped working and there is some sticky residue around the keys. I'm on the protection plan. How much would it cost to get this fixed?",
- "known_facts": {"device": "laptop", "event_date": "unknown", "cause": "unknown"},
- "missing_info": ["event_date", "cause"],
- "route_answer": "file_claim",
- "rubric": ["states the laptop deductible amount",
-            "does not tell the customer to contact the manufacturer",
-            "does not re-ask which device it is",
-            "asks what happened to the laptop or when it happened",
-            "asks at most one question",
-            "60 words or fewer"]}
+{"task_id": "t142",
+ "device": null,
+ "peril": "loss",
+ "tone": "frustrated",
+ "typos": true,
+ "account": {},
+ "goal": "is_this_covered",
+ "customer": "Hi, ive looked everywhere for it and its just gone, pretty sure it fell out of my bag at the gym. ive been paying for this plan for months, is it covered?",
+ "route_answer": "ask_question",
+ "rubric": [
+   {"id": "common.word_count", "check": "code", "question": "Is the reply 60 words or fewer?", "expect": "yes"},
+   {"id": "common.question_cap", "check": "code", "question": "Does the reply ask 2 questions or fewer?", "expect": "yes"},
+   {"id": "common.no_reask", "check": "judge", "question": "Does the reply ask for information the customer already gave?", "expect": "no"},
+   {"id": "common.on_topic", "check": "judge", "question": "Does the reply say anything unrelated to the customer's message?", "expect": "no"},
+   {"id": "ask_question.asks_missing", "check": "judge", "question": "Does the reply ask for the information missing from the customer's message?", "expect": "yes"},
+   {"id": "ask_question.no_assertion", "check": "judge", "question": "Does the reply assert something it cannot know yet?", "expect": "no"},
+   {"id": "peril.loss", "check": "judge", "question": "Does the reply say that loss coverage applies to phones only?", "expect": "yes"},
+   {"id": "missing.device", "check": "judge", "question": "Does the reply ask which device it is?", "expect": "yes"}
+ ]}
 ```
+
+The rubric above is the complete assembly for this combination, not a sample of it: four common
+items, two from the gold route, one peril item, and one missing-information item. No exclusion
+item is attached, because `device` is null. `account` is `{}` for the same reason. The device
+the sentence was written around is not on the record at all.
+
+Only two fields of a task record reach the model: `customer` and `account`. `route_answer`,
+`rubric`, `device`, `peril` and `tone` never do. They are generator and scoring metadata and
+stay out of the prompt.
 
 ## Model output
 
 The policy model must output one JSON object: `{"route": <one of ROUTES>, "reply": <text to customer>}`.
 
-`ROUTES = ["file_claim", "tech_support", "refer_to_manufacturer", "deny_waiting_period", "deny_claim_limit", "deny_not_covered", "escalate"]`
+`ROUTES = ["ask_question", "file_claim", "tech_support", "refer_to_manufacturer", "explain_waiting_period", "explain_not_covered", "escalate"]`
 
-Traps are not a separate list: they follow from `account` and `peril`
-(e.g. enrolled_days_ago < 31 → deny_waiting_period; loss on a non-phone → deny_not_covered).
+- `ask_question` = not enough information to decide yet; the correct reply asks for the
+  missing detail instead of routing.
+- The chatbot never approves or denies a claim. `explain_*` routes state a policy term that
+  the documents settle outright and that has no exceptions. `escalate` is for cases where the
+  outcome depends on facts only a human can look at.
+- `escalate` was removed earlier on the grounds that a route which never appears as a gold
+  answer only teaches the model to pick it at random. Route rule 2 makes it a gold answer,
+  so that reason no longer holds.
+- There is no `deny_claim_limit`. Reaching the limit is not automatically a refusal, so those
+  cases go to `escalate`.
+
+Traps are not a separate list: they follow from `account`, `peril`, and `device`
+via the route_answer rule under Data generation
+(e.g. enrolled_days_ago < 31 → explain_waiting_period; loss on a non-phone → explain_not_covered).
 
 ## Reward
 
@@ -112,25 +270,161 @@ Training runs on Colab; the Colab notebook calls the Mac judge over HTTP through
 (ngrok or similar). This wiring is not built yet.
 
 <!-- Copy this block verbatim into README.md when the README is written. -->
-## Rubric rule: peril AND volunteered_info together
+## Rubric rule: a task never carries a fact the customer did not state
 A rubric item must never reward a claim the customer gave no evidence for.
-Rubric items come from two inputs, not one:
-- `peril` decides which coverage facts apply.
-- `volunteered_info` decides which of those facts the model is allowed to state.
-Example: peril = liquid, volunteered_info = device_only. The customer did not say what happened.
-- Wrong rubric item: "states that liquid damage is covered." A reply that guesses "liquid"
-  would score higher than one that asks, so the model learns to guess causes.
-- Right rubric item: "asks what happened to the device." The coverage item is only added
-  when volunteered_info includes the cause.
-This is the most common way a rubric-based reward gets gamed, so the rubric template code
-must branch on both fields.
+An earlier design kept the true peril on every task and relied on the rubric assembly to leave
+it alone when the customer had not stated it. Storing `null` instead removes the possibility:
+when the customer did not name the device or the peril, the record holds no value to leak, so
+no rubric item, prompt field, or grader check can reach for one.
+- Wrong rubric item: "states that liquid damage is covered", on a task where the customer only
+  said the device stopped working. A reply that guesses "liquid" would score higher than one
+  that asks, so the model learns to guess.
+- Right rubric item: "asks what happened". The coverage item exists only when `peril` is not
+  null.
+This is the most common way a rubric-based reward gets gamed, so the fact never enters the task
+in the first place.
+
+## Rubric
+
+A rubric is a list of atomic pass/fail items attached to one task. The fraction of items that
+pass is the reply half of the reward. Items are concatenated from three bundles: common items
+on every task, items fixed by the gold route, and items that vary per task.
+
+### Item format (proposed)
+
+Every item is one object with four fields:
+
+```json
+{"id": "escalate.no_reason",
+ "check": "judge",
+ "question": "Does the reply explain why the case is being handed to a person?",
+ "expect": "no"}
+```
+
+- `question` is always phrased positively, as a yes/no question about the reply. Negative items
+  are not written as negated text; they are written as a positive question with `expect: "no"`.
+- `expect` is the answer that makes the item pass, `"yes"` or `"no"`. This is the expected
+  direction. An item passes when the answer equals `expect`, so both directions score the same
+  way and no item needs special handling.
+- `check` is `"code"` or `"judge"`, and decides which half of `reward/` evaluates the item.
+  `code` items go to `rubric_checks.py`, `judge` items to `judge.py` as one yes/no call each.
+- `id` names the bundle and the item, so a reward hack can be traced to the item that paid for it.
+
+### Common items (every task)
+
+| question | check | expect |
+|---|---|---|
+| Is the reply 60 words or fewer? | code | yes |
+| Does the reply ask 2 questions or fewer? | code | yes |
+| Does the reply ask for information the customer already gave? | judge | no |
+| Does the reply say anything unrelated to the customer's message? | judge | no |
+
+Exception, carried over from the earlier assembly rules: when both `device` and `peril` are
+null the customer has stated nothing, so the "already gave" item is not attached. An item that
+always passes is free credit and inflates the reward.
+
+### Per-route items
+
+Every item below is a `judge` item.
+
+| route | question | expect |
+|---|---|---|
+| ask_question | Does the reply ask for the information missing from the customer's message? | yes |
+| ask_question | Does the reply assert something it cannot know yet? | no |
+| file_claim | Does the reply say the incident is covered? | yes |
+| file_claim | Does the reply state the deductible amount? | yes |
+| file_claim | Does the reply say how to start the claim? | yes |
+| file_claim | Does the reply mention documentation that may be requested? | yes |
+| escalate | Does the reply say the case is being handed to a person? | yes |
+| escalate | Does the reply say the claim is denied? | no |
+| escalate | Does the reply explain why the case is being handed to a person? | no |
+| explain_waiting_period | Does the reply state the 31-day rule? | yes |
+| explain_waiting_period | Does the reply say the plan itself is active? | yes |
+| explain_waiting_period | Does the reply say when coverage begins? | yes |
+| explain_not_covered | Does the reply say it is not covered? | yes |
+| explain_not_covered | Does the reply ground that in the policy? | yes |
+| explain_not_covered | Does the reply offer an alternative, if one exists? | yes |
+| refer_to_manufacturer | Does the reply direct the customer to the manufacturer warranty? | yes |
+| refer_to_manufacturer | Does the reply explain why? | yes |
+| tech_support | Does the reply identify the problem as a software problem and not a claim? | yes |
+| tech_support | Does the reply say tech support handles it at no charge? | yes |
+| tech_support | Does the reply give a concrete step the customer can try? | yes |
+
+### Per-task items
+
+Four generators, all producing `judge` items.
+
+**Peril.** One item naming the specific coverage for that peril. It is attached only when all
+three of these hold:
+- `peril` is not null. When the customer has not said what happened, the reply cannot be
+  expected to name a coverage it has no way to know, and the record does not hold the value
+  either.
+- `device` is not null. Coverage detail differs by device, so it cannot be stated while the
+  device is unknown.
+- the gold route is `file_claim`. On any other route, stating coverage contradicts the route's
+  own items: `explain_not_covered` already says it is not covered, `refer_to_manufacturer`
+  sends the customer elsewhere, `escalate` must not explain anything, and `ask_question` must
+  not assert what it cannot know yet.
+
+There is no `software` row. The tech_support item "identifies the problem as a software problem
+and not a claim" already covers it, and keeping both would pay twice for one sentence.
+
+Exact phrasings:
+
+| peril | phrasing |
+|---|---|
+| crack | cracked screen coverage |
+| drop | accidental damage coverage |
+| liquid | liquid damage coverage |
+| surge | power surge coverage |
+| battery | battery failure coverage |
+| malfunction | mechanical failure coverage |
+| wear | wear and tear coverage |
+| environment | environmental damage coverage |
+| loss | loss coverage, phones only |
+| theft | theft coverage, phones only |
+
+**Device and price.** The deductible figure the answer should state comes from
+`device_price_tier` for phones (`data/kb/05_deductibles_phone.md`) and is flat for laptop,
+tablet, and watch (`data/kb/06_deductibles_other_devices.md`).
+
+A phone task has two amounts, because repair and replacement differ, and one item asks for
+both: "Does the reply state both deductible amounts for this price tier, $X for repair and $Y
+for replacement?" Not "X or Y" — that splits the judge's verdict and the item stops being
+atomic. The reply states both because `data/kb/05_deductibles_phone.md` says the plan decides
+between repair and replacement and the customer cannot choose, so neither amount is settled at
+the time of the reply. Laptop, tablet and watch keep their single flat amount.
+
+Model-specific pricing is out of scope. `data/kb/05_deductibles_phone.md` also carries a flat
+$29 screen repair for eligible models, but a task has no model field, so that line can never be
+applied and must not appear in any rubric item. `model` is not a component.
+
+Loss and theft on a phone are the one case where no figure can be named, because the same file
+tiers those by model. The item asks instead: "Does the reply say the exact deductible depends on
+the phone model and is shown when the claim is started?" That stays in scope while the $29
+screen repair does not, because `data/kb/05_deductibles_phone.md` states the tier is shown when
+the claim is started, so the reply can say so without knowing the model.
+
+Carried over from the earlier assembly rules: an amount may only be demanded when both `device`
+and `peril` are not null, since naming a figure without knowing the device is guessing. On
+`file_claim` route rule 1 already guarantees both, so this condition is met by construction
+there.
+
+**Missing information.** One item per null field, naming that field. When neither field is null
+there is nothing left to ask for, so instead one item is attached asking whether the reply asked
+any question at all, with `expect: "no"`.
+
+**Device-specific exclusion.** Added when the peril is excluded for that device, e.g. loss on a
+watch: the answer should say loss coverage is phones only. Attached only when `device` is not
+null, for the same reason as the peril item: a reply that has not been told the device cannot be
+expected to name an exclusion that depends on it.
 
 ## Training
 
 - Policy model: `Qwen2.5-0.5B-Instruct` first; move to 1.5B only if 0.5B clearly works.
 - Algorithm: GRPO via the `trl` library. Generate ~8 replies per task, score each with the reward, update.
 - Hardware: Google Colab, A100 40GB (paid compute units; budget is fine). Training does NOT run on the Mac.
-- Evaluate on a held-out split (e.g. 40 of the 200 tasks) that training never sees.
+- Evaluate on `tasks_test.jsonl` (40 tasks) that training never sees.
 
 ## Repo layout
 
@@ -140,8 +434,10 @@ support-rl-env/
   data/
     kb/                  ~15 knowledge-base docs (.md)
     components.py        the fixed component lists above
-    generate_tasks.py    samples components, calls an LLM for the sentence, writes tasks.jsonl
-    tasks.jsonl          200 task records
+    generate_tasks.py    samples components, calls an LLM for the sentence, writes the three splits
+    tasks_train.jsonl    320 task records
+    tasks_val.jsonl      40 task records
+    tasks_test.jsonl     40 task records
   reward/
     rubric_checks.py     code checks: word count, question count
     judge.py             yes/no judge call per rubric item
@@ -159,8 +455,9 @@ support-rl-env/
 
 ## Not decided yet
 
-- Trap ratio in the 200 tasks.
-- How the 40 held-out tasks are chosen (random vs stratified by device × peril).
+- Exact wording of the per-peril item sets (11 perils).
+- How many rubric items a task should carry, and whether every generator above fires on
+  every route.
 - Reward weight between route and reply.
 - Tunnel setup between Colab and the Mac judge.
 
