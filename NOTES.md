@@ -4,7 +4,8 @@ Continuity notes for the training track. CLAUDE.md is the design; this file is w
 stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2 datasets).
 
 ## Machines
-- GPU server: `aeril@192.168.88.172` (host aeri-desktop), Quadro RTX 8000 48 GB, sm_75. Project
+- GPU server: `aeril@192.168.88.172` on the home LAN, `aeril@100.114.223.31` over Tailscale (host
+  aeri-desktop; the LAN address times out away from home), Quadro RTX 8000 48 GB, sm_75. Project
   at `~/RL` (rsynced from this checkout, not a git clone — git is not installed there), venv at
   `~/RL/.venv` (torch 2.11 cu128, transformers 5.17.0, trl 1.13.0, peft 0.20.0). Key auth with
   `~/.ssh/id_ed25519`. Sync with rsync; `.env`, `.venv`, `.git`, scratch files, v1/v2 data and
@@ -336,6 +337,16 @@ from a checkout at or after a4d8602.
   jsonl records carry `adapter`). `eval/passk_buckets.py <jsonl...>` buckets tasks by gold
   hits (0, 1-3, 4-12, 13-15, all) and lists the 4-12 tasks; on the 14B base the mixed bucket
   is 1 task under v5 (t069) and 6 under v8 (four explain_not_covered, t044, t174).
+- 14B base pass@16 on the sub35 training set with v8 + the reasoning field, 768-token cap
+  (`out/passk_base14b_v8reason_sub35.jsonl`, server, 106.1 min, 41.75 GiB allocated, 4
+  sequences per call after OOM at 16 and 8): pass@1 24/35, pass@16 27/35, parse 560/560, mean
+  completion 139 tokens, none at the cap. Buckets: 0/16 = 8 (ask 4, escalate 3, refer 1),
+  1-3 = 3, 4-12 = 5 (t290 ask, t024 escalate, t087 waiting, t103 and t110 refer), 13-15 = 9,
+  16/16 = 10. Against the no-reasoning Colab run's counts (12 / ? / 5 / ? / 12) the zero
+  bucket shrank from 12 to 8 and the top from 12 to 10; the per-task comparison needs
+  `out/passk_base14b_v8_sub35.jsonl` from Drive, not in the repo yet. escalate stays the
+  weak route (0/5 pass@1, 2/5 pass@16): at the claim limit the reasoning field argues
+  "warranty referral takes priority" and picks refer, or file_claim.
 
 ## Trainer and reward (uncommitted code)
 - `train/train_grpo.py`: fixed settings (see README "Training setup"); overrides `--out
