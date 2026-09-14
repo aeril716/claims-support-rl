@@ -1,4 +1,4 @@
-# Working notes (state as of 2026-09-13 19:30, uncommitted)
+# Working notes (state as of 2026-09-14 04:20, uncommitted)
 
 Continuity notes for the training track. CLAUDE.md is the design; this file is where things
 stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2 datasets).
@@ -249,6 +249,21 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
 - New trainer flags: `--model` (default Qwen2.5-7B-Instruct), `--bf16` (fp16 otherwise; the
   Quadro has no bf16); the timing callback prints s/step and peak VRAM after step 2. Eval:
   `--bf16`. Both default to the run1-run7 behaviour.
+
+## pass@k route check (2026-09-14, 14B base, stratified test, server)
+- `eval/pass_at_k.py`: k sampled completions per task (temperature 1.0 = the GRPO trainer's
+  setting, top_p 1.0, max_new_tokens 512 as before_after.py), routes parsed with the same
+  repairs, one jsonl line per task, pass@1/2/4/8/16 per gold route beside the greedy run.
+  On the 48 GB card 14B fp16 could not hold 16 sequences over a 3,200-token prompt in one
+  generate() call (23.5 GiB prefill block); the script halves the chunk on OOM and settled
+  at 4 per call, so the 16 samples are four independent draws on the same prompt.
+- Results (`out/passk_base14b_v5_test3.jsonl`, `..._v8_...`, committed with -f since out/ is
+  ignored): v5 pass@1 29/40, pass@16 32/40 (greedy 30); v8 pass@1 29/40, pass@16 33/40
+  (greedy 30). refer_to_manufacturer under v5: 25 of 640 samples, 2 of 6 gold tasks hit at
+  1/16 each; under v8: 131 samples, 4 of 6 gold tasks at 14-16/16, the two at-limit ones
+  0/16 (all escalate). explain_waiting_period: v5 42 samples, gold hit on 3 of 5 tasks
+  (16, 15, 11 of 16; t044 and t170 0/16); v8 62 samples, 4 of 5 (t022 0/16, all refer).
+  Peak allocated 46.0 / 41.6 GiB; wall 138.8 / 101.8 min. Parse rate 0.991 / 0.995.
 
 ## Trainer and reward (uncommitted code)
 - `train/train_grpo.py`: fixed settings (see README "Training setup"); overrides `--out
