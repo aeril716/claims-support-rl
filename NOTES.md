@@ -214,7 +214,9 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
   from a Colab secret, sends one test judge call, then: 14B base eval v5 -> run8 (14B bf16,
   LoRA r=16, v5, sub35, 8 gen, 2x4, beta 0, seed 42, 35 steps) -> checkpoint-35 eval ->
   the same three cells for v8 as run9. Outputs go to Drive. The notebook clones the public
-  repo at commit cb4130f (code, KB versions, relabeled splits all committed there); the
+  repo at commit f4708b0 (code, KB versions, relabeled splits all committed there); the
+  install cell uninstalls Colab's torchao 0.10, which peft 0.20 rejects; peft needs it only
+  for quantized layers and imports without it (verified on the server); the
   earlier Drive bundle step is gone.
 - Judge backend switch in reward/judge.py: `JUDGE_BACKEND=ollama` (default, runs 1-7) or
   `anthropic` (Messages API, `claude-haiku-4-5`, no sampling parameters because anthropic 1.x
