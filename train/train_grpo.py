@@ -59,6 +59,8 @@ ANSWER_FORMAT = '{"route": <one of the routes below>, "reply": <your message to 
 ANSWER_FORMAT_REASONING = ('{"reasoning": <one or two sentences: which device and incident you read, '
                            'and which rule applies>, "route": <one of the routes below>, '
                            '"reply": <your message to the customer>}')
+# The same field as a line of the multi-line answer blocks (v5-v8 with --reasoning).
+REASONING_LINE = ' "reasoning": <one or two sentences: which device and incident you read, and which rule applies>,'
 
 
 # Prompt v5: six fact fields before the route, in place of the --reasoning field.
@@ -101,11 +103,17 @@ def answer_section(version=None, reasoning=None):
     version = version or PROMPT_VERSION
     reasoning = REASONING if reasoning is None else reasoning
     if version in ("v5", "v6", "v7", "v7run7", "v8"):
-        if reasoning:
-            raise ValueError(f"prompt {version} has its own fact fields; --reasoning does not apply to it")
         if version in ("v7", "v7run7"):
-            return ANSWER_SECTION_V7
-        return ANSWER_SECTION_V8 if version == "v8" else ANSWER_SECTION_V5
+            section = ANSWER_SECTION_V7
+        else:
+            section = ANSWER_SECTION_V8 if version == "v8" else ANSWER_SECTION_V5
+        if reasoning:
+            # The same reasoning field as ANSWER_FORMAT_REASONING, placed just before "route"
+            # so the fact fields, the reasoning, the route, and the reply come in that order.
+            marker = ' "route": <one of the routes below>,'
+            assert section.count(marker) == 1
+            section = section.replace(marker, REASONING_LINE + "\n" + marker)
+        return section
     return "Answer with exactly one JSON object and nothing else:\n" + answer_format(reasoning)
 
 ROUTES_V2 = """Routes (choose exactly one):
