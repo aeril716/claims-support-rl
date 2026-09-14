@@ -238,6 +238,12 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
   fails too the item gets verdict "no" with reasoning "judge_parse_failure" and the run goes
   on. The count is `judge_failures` in every summary.json (and inside the trainer's judge
   block); it is 0 on the ollama path by construction.
+- Third hardening (run8 on Colab died at step 6 on a fenced reply cut at max_tokens; that
+  runtime was on a checkout older than 325d057): `_call_anthropic` is wrapped so it never
+  raises; an API error after the SDK's retries is also recorded (reasoning
+  "judge_api_failure: <Exception>") and counted; a reply that opens an object and never
+  closes it is treated as truncated and retried regardless of stop_reason. Offline tests in
+  `reward/test_judge.py` (`python -m unittest reward.test_judge`) feed that exact reply.
 - Runs 8-9 (Colab) use claude-haiku-4-5 as judge, so their rubric scores are not comparable
   with runs 3-7 (qwen3:30b-a3b); route accuracy is comparable.
 - New trainer flags: `--model` (default Qwen2.5-7B-Instruct), `--bf16` (fp16 otherwise; the

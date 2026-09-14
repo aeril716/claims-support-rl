@@ -21,6 +21,7 @@ Standard library only: urllib.request, no client package.
 import json
 import os
 import re
+import sys
 import threading
 import urllib.request
 
@@ -89,26 +90,39 @@ def _anthropic_once(content):
     return text, response.stop_reason
 
 
-def _call_anthropic(prompt, accept):
-    """Return the JSON object in the judge's reply. Same prompt text as the ollama path plus
-    ANTHROPIC_SUFFIX; the schema is asked for in the prompt and checked by `accept` after
-    parsing, since the Messages API does not constrain the output. A reply that does not parse
-    (or was cut at max_tokens) is asked once more with a stricter instruction; if that fails
-    too, the item is recorded as a parse failure with verdict "no" and the run goes on."""
-    text, stop = _anthropic_once(prompt + ANTHROPIC_SUFFIX)
-    obj = _first_object(text, accept) if stop != "max_tokens" else None
-    if obj is not None:
-        return obj
-    retry = prompt + ANTHROPIC_RETRY_SUFFIX
-    text2, stop2 = _anthropic_once(retry)
-    obj = _first_object(text2, accept) if stop2 != "max_tokens" else None
-    if obj is not None:
-        LAST["retried"] = True
-        return obj
+FALLBACK_PARSE = {"reasoning": "judge_parse_failure", "verdict": "no"}
+
+
+def _record_failure(kind, detail):
     with _FAILURES_LOCK:
         FAILURES["count"] += 1
-    LAST.update({"parse_failure": True, "first_reply": text[:300], "second_reply": text2[:300]})
-    return {"reasoning": "judge_parse_failure", "verdict": "no"}
+    LAST.update({"failure": kind, "detail": detail})
+    print(f"[judge] {kind}: {detail[:160]!r}; verdict recorded as no", file=sys.stderr, flush=True)
+
+
+def _call_anthropic(prompt, accept):
+    """Return the JSON object in the judge's reply, and never raise. Same prompt text as the
+    ollama path plus ANTHROPIC_SUFFIX; the schema is asked for in the prompt and checked by
+    `accept` after parsing, since the Messages API does not constrain the output. A reply
+    that does not parse, or was cut at max_tokens, is asked once more with a stricter
+    instruction. If that fails too, or the API call itself fails after the SDK's own retries,
+    the item is recorded with verdict "no" (reasoning "judge_parse_failure" or
+    "judge_api_failure") and counted in FAILURES, so a run continues."""
+    try:
+        text, stop = _anthropic_once(prompt + ANTHROPIC_SUFFIX)
+        obj = _first_object(text, accept) if stop != "max_tokens" else None
+        if obj is not None:
+            return obj
+        text2, stop2 = _anthropic_once(prompt + ANTHROPIC_RETRY_SUFFIX)
+        obj = _first_object(text2, accept) if stop2 != "max_tokens" else None
+        if obj is not None:
+            LAST["retried"] = True
+            return obj
+        _record_failure("judge_parse_failure", f"first={text[:200]!r} second={text2[:200]!r}")
+        return dict(FALLBACK_PARSE)
+    except Exception as exc:                       # noqa: BLE001  the run must not die here
+        _record_failure("judge_api_failure", f"{type(exc).__name__}: {exc}")
+        return {"reasoning": f"judge_api_failure: {type(exc).__name__}", "verdict": "no"}
 
 
 def judge_failures():
@@ -136,6 +150,8 @@ def _first_object(text, accept):
     as a whole, then every balanced {...} candidate from each opening brace, so prose or fences
     around the object, or a second object after it, do not fail the verdict."""
     text = _strip_fences(text)
+    if "{" in text and "}" not in text[text.index("{"):]:
+        return None                                # opened an object and never closed it: truncated
     decoder = json.JSONDecoder()
     candidates = [text] if text.startswith("{") else []
     for match in re.finditer(r"\{", text):
