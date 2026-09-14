@@ -175,6 +175,24 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
   8-9): rubric 0.852 vs the 14B base's 0.793. Weak items: common.word_count 13/40 (the teacher
   writes long replies), explain_not_covered.grounded 2/7, refer_to_manufacturer.why 2/4,
   ask_question.no_assertion 8/12. Route-specific content items are near 100%.
+- r2 (same teacher, n=3, 307 tasks, $3.10, 23.1 min) with two changes: the line "Keep the
+  reply to 60 words or fewer." appended to the TEACHER's system prompt only (the student
+  prompt in the SFT file is byte-identical to the trainer's rendering), and a fact filter:
+  kept only if route == gold AND enrolled_days_ago, inside_waiting_period,
+  claim_limit_reached match the values from the account under the label rules (31 days, per-
+  device claim limit; empty account -> null/unknown). Files `out/teacher_v8reason_train_r2.jsonl`
+  and `data/sft/train_v8reason_r2.jsonl`; r1 files untouched.
+  First-sample route accuracy 268/307 (ask 100/128, file 44/45, not_covered 36/36, escalate
+  23/28, refer 25/30, waiting 13/13, tech 27/27). Kept 432 samples over 222 tasks (r1: 557
+  over 281). Route right but facts wrong: 182 of 804 route-right samples, 182 of them on
+  claim_limit_reached (ask 87, tech 33, not_covered 32, refer 18, escalate 12), 4 on
+  inside_waiting_period; the teacher writes "unknown" for the limit on routes the limit does
+  not decide, and "no" at exactly the limit (2 of 2). Only 1 of the 11 refer-at-limit tasks
+  keeps a sample. Applied after the fact to r1, the same filter would remove 128 of 557 kept
+  samples and leave 222 tasks, so the two runs are comparable on coverage.
+  Replies: mean 45 words, 7/432 over 60 (r1: 75 words, 361/557 over 60). Parse 920/921.
+  Haiku rubric on 40 random kept: 0.900 (r1 0.852, base 0.793); word_count 39/40 now; still
+  weak: explain_not_covered.grounded 0/5 and .alternative 0/5, ask_question.no_assertion 5/11.
 
 ## Colab runs 8 and 9 (14B, A100 80GB, judge claude-haiku-4-5)
 Both trained on the relabeled sub35 with the run4 settings (8 generations, batch 2x4, beta 0,
