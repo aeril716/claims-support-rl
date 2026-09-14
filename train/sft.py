@@ -1,10 +1,14 @@
 """Supervised fine-tuning (SFT) arm on the GPU server: teach the policy by imitating teacher replies.
 
-    nohup .venv/bin/python train/sft.py > out/sft_r3_14b.log 2>&1 &
+    nohup .venv/bin/python train/sft.py > out/sft_r3_14b.log 2>&1 &    # GPU server (sm_75)
+    python train/sft.py --bf16                                          # Colab A100
 
 Policy: Qwen2.5-14B-Instruct with a LoRA adapter (r=16, same seven projection modules as
 train/train_grpo.py). The GPU is a Quadro RTX 8000 (compute capability 7.5), which has no
 bf16, so the base is loaded in fp16 with SDPA attention and the LoRA weights stay in fp32.
+With --bf16 (for GPUs that have it, such as the Colab A100) the base is loaded in bfloat16
+instead and training uses bf16 mixed precision, which needs no grad scaler. Every other
+setting is the same in both modes.
 
 Data: data/sft/train_v8reason_r3.jsonl (teacher samples, already filtered to the gold route).
 The training set is built in two steps:
@@ -18,9 +22,9 @@ data/sft/used_r3.jsonl. Gold routes come from data/v3_kb_definitions/tasks_train
 Loss is computed on the completion tokens only: prompt tokens get label -100, which the loss
 ignores. The completion is followed by <|im_end|> so the model learns where to stop.
 
-Out-of-memory fallback: training runs in a child process. If the fp16 LoRA child runs out of
-GPU memory it exits with code 3, and the parent starts a second child that loads the base in
-4-bit (QLoRA) with the same LoRA settings. A fresh process guarantees the GPU is empty.
+Out-of-memory fallback: training runs in a child process. If the fp16 (or bf16) LoRA child runs
+out of GPU memory it exits with code 3, and the parent starts a second child that loads the base
+in 4-bit (QLoRA) with the same LoRA settings. A fresh process guarantees the GPU is empty.
 
 Output: the adapter in out/sft_r3_14b/, plus run_stats.json there (mode, peak VRAM, wall time,
 loss at every step).
@@ -110,9 +114,10 @@ def build_training_set():
     return counts
 
 
-def train(mode):
-    """Train one LoRA adapter. mode is "fp16" or "qlora"."""
+def train(mode, bf16):
+    """Train one LoRA adapter. mode is "fp16", "bf16" or "qlora"; bf16 picks the half-precision type."""
     import torch
+    half = torch.bfloat16 if bf16 else torch.float16
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
     from transformers import (AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig,
                               Trainer, TrainerCallback, TrainingArguments)
@@ -134,13 +139,11 @@ def train(mode):
                 "labels": torch.tensor([b["labels"] for b in batch])}
 
     load_kwargs = {"attn_implementation": "sdpa", "device_map": {"": 0}}
-    if mode == "fp16":
-        load_kwargs["dtype"] = torch.float16
-    else:
-        load_kwargs["dtype"] = torch.float16
+    load_kwargs["dtype"] = half
+    if mode == "qlora":
         load_kwargs["quantization_config"] = BitsAndBytesConfig(
             load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
-            bnb_4bit_compute_dtype=torch.float16)
+            bnb_4bit_compute_dtype=half)
     model = AutoModelForCausalLM.from_pretrained(MODEL, **load_kwargs)
     model.config.use_cache = False
     if mode == "qlora":
@@ -149,7 +152,7 @@ def train(mode):
     lora = LoraConfig(r=16, lora_alpha=32, lora_dropout=0.0, task_type="CAUSAL_LM",
                       target_modules=TARGET_MODULES)
     model = get_peft_model(model, lora)
-    # fp16 mixed precision needs the trainable weights in fp32
+    # mixed precision keeps the trainable weights in fp32 (fp16 requires it; bf16 keeps it identical)
     for p in model.parameters():
         if p.requires_grad:
             p.data = p.data.float()
@@ -168,7 +171,8 @@ def train(mode):
         gradient_accumulation_steps=8,
         learning_rate=1e-4,
         num_train_epochs=3,
-        fp16=True,
+        fp16=not bf16,
+        bf16=bf16,
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=1,
@@ -186,7 +190,7 @@ def train(mode):
     model.save_pretrained(str(OUT))
     tokenizer.save_pretrained(str(OUT))
 
-    stats = {"mode": mode, "model": MODEL, "examples": len(examples),
+    stats = {"mode": mode, "half_dtype": str(half), "model": MODEL, "examples": len(examples),
              "optimizer_steps": trainer.state.global_step,
              "train_seconds": round(train_seconds, 1),
              "peak_vram_allocated_gb": round(torch.cuda.max_memory_allocated() / 1024**3, 2),
@@ -198,10 +202,10 @@ def train(mode):
     print(json.dumps({k: v for k, v in stats.items() if k != "losses"}), flush=True)
 
 
-def child(mode):
+def child(mode, bf16):
     import torch
     try:
-        train(mode)
+        train(mode, bf16)
     except torch.OutOfMemoryError as e:
         print(f"[{mode}] OUT OF MEMORY: {e}", flush=True)
         sys.exit(OOM_EXIT)
@@ -214,10 +218,12 @@ def child(mode):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--child", choices=["fp16", "qlora"])
+    parser.add_argument("--child", choices=["fp16", "bf16", "qlora"])
+    parser.add_argument("--bf16", action="store_true",
+                        help="load and train in bfloat16 (A100 and newer) instead of fp16")
     args = parser.parse_args()
     if args.child:
-        child(args.child)
+        child(args.child, args.bf16 or args.child == "bf16")
         return
 
     start = time.time()
@@ -225,9 +231,10 @@ def main():
     build_training_set()
 
     code = None
-    for mode in ("fp16", "qlora"):
+    precision = ["--bf16"] if args.bf16 else []
+    for mode in ("bf16" if args.bf16 else "fp16", "qlora"):
         print(f"=== starting {mode} run ===", flush=True)
-        code = subprocess.call([sys.executable, __file__, "--child", mode])
+        code = subprocess.call([sys.executable, __file__, "--child", mode] + precision)
         if code != OOM_EXIT:
             break
         print(f"=== {mode} ran out of GPU memory; falling back ===", flush=True)
