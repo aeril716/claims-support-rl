@@ -10,6 +10,7 @@ that no writer is concentrated on one route. Which one wrote a sentence is recor
 """
 
 import argparse
+import difflib
 import json
 import os
 import random
@@ -21,8 +22,12 @@ from pathlib import Path
 import httpx
 from dotenv import load_dotenv
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+sys.path.insert(0, str(HERE.parent))
 import components as C
+import peril_definitions as P
+import target_distribution as T
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -32,8 +37,7 @@ OPENAI_MODEL = "gpt-5.6-sol"
 GOOGLE_MODEL = "gemini-3.5-flash-lite"
 WRITERS = ["anthropic", "openai", "google"]
 
-DEFAULT_TASKS = 400
-DEFAULT_OUT = Path(__file__).resolve().parent
+DEFAULT_OUT = HERE
 
 
 def split_sizes(count):
@@ -45,6 +49,22 @@ def split_sizes(count):
 BATCH_SIZE = 4
 SEED = 7
 PARSE_ATTEMPTS = 3
+
+# A combination whose sentence keeps failing validation is rewritten this many times, always
+# for the same combination, then reported as a failed cell. Never more, never a substitute.
+MAX_ATTEMPTS = 5
+REJECTION_LOG = "rejections.jsonl"
+
+# Wall time and call counts, reported at the end of a run. Measurement only; nothing reads it.
+TIMING = {"writer_s": 0.0, "writer_calls": 0, "judge_s": 0.0, "judge_calls": 0}
+PARROT_RATIO = 0.8      # difflib ratio at which a misspelling still counts as the same word
+DEFINITION_RUN = 4      # consecutive content words copied from a definition that count as copying
+
+# Words skipped when a message is reduced to content words, so that "a power surge" and
+# "power surge" are the same phrase.
+FILLER = {"a", "an", "the", "and", "or", "of", "my", "is", "was", "it", "its", "to", "in", "on",
+          "from", "for", "with", "this", "that", "has", "have", "had", "been", "be", "not",
+          "no", "so", "out", "up", "at", "by", "i", "im", "ive", "me", "we", "you"}
 
 # Sentences already written are kept beside the output, keyed by task_id, so a crash does not
 # throw away what was already generated. The cache lives in the output directory because the
@@ -163,15 +183,16 @@ def largest_remainder(total, weights):
 
 # ---------------------------------------------------------------- drawing a task
 
-def build_cells(count):
-    """One cell is one CUSTOMER_STATES outcome by one peril. Cell sizes follow the weights."""
-    cells = []
-    weights = []
-    for stated, weight in C.CUSTOMER_STATES:
+def build_cells():
+    """One cell is one customer_states outcome by one peril. The count per cell comes from
+    data/target_distribution.py; a zero there (loss and theft with the peril hidden) means the
+    cell is never drawn."""
+    cells, counts = [], []
+    for key, stated in T.STATES.items():
         for peril in C.PERILS:
             cells.append((stated, peril))
-            weights.append(weight)
-    return cells, largest_remainder(count, weights)
+            counts.append(T.cell_target(key, peril))
+    return cells, counts
 
 
 def draw_components(rng, stated, peril):
@@ -198,12 +219,18 @@ def draw_components(rng, stated, peril):
 
 
 def route_answer(device, peril, enrolled, claims):
-    """The rules in CLAUDE.md, top to bottom, first match wins. `device` and `peril` are the
-    record values, so they are None when the customer did not state them."""
+    """Top to bottom, first match wins. `device` and `peril` are the record values, so they
+    are None when the customer did not state them.
+
+    Order, corrected 2026-09-13 (the waiting-period rule used to sit second). The KB gives tech
+    support no waiting period (data/kb/03, 12), sends manufacturer-warranty defects to the
+    manufacturer regardless of plan coverage (10), and excludes non-phone loss and theft
+    permanently (01, 11). So explain_waiting_period is only the answer when the incident would
+    otherwise be a covered claim: physical perils, and loss or theft on a phone. It therefore
+    comes after the rules that settle software, warranty, and not-covered cases, and after the
+    claim limit (which account consistency makes 0 inside the waiting period anyway)."""
     if device is None or peril is None:
         return "ask_question"
-    if enrolled < 31:
-        return "explain_waiting_period"
     # A peril the plan can handle neither as a claim nor through tech support. Across our
     # eleven perils that is loss or theft on anything but a phone.
     if peril in PHONE_ONLY_PERILS and device != "phone":
@@ -214,6 +241,8 @@ def route_answer(device, peril, enrolled, claims):
         return "refer_to_manufacturer"
     if claims >= C.CLAIM_LIMITS[device]:
         return "escalate"
+    if enrolled < 31:
+        return "explain_waiting_period"
     return "file_claim"
 
 
@@ -294,7 +323,7 @@ def case_block(number, drawn):
 
     stated, withheld = [], []
     (stated if drawn["stated_device"] else withheld).append(f"the device, which is a {device}")
-    (stated if drawn["stated_peril"] else withheld).append(f"what happened, which is: {peril}")
+    (stated if drawn["stated_peril"] else withheld).append("what happened")
 
     lines.append("  States: " + ("; ".join(stated) if stated else
                                  "neither the device nor what happened"))
@@ -303,7 +332,15 @@ def case_block(number, drawn):
     if not drawn["stated_device"]:
         lines.append("  Must not contain any word that would reveal the device: "
                      + ", ".join(DEVICE_GIVEAWAYS) + ". Refer to it only as 'it'.")
-    if not drawn["stated_peril"]:
+    if drawn["stated_peril"]:
+        lines.append(f"  peril: {peril}")
+        lines.append(f"  definition: {P.DEFINITION[peril]}")
+        for other in P.NOT_THIS[peril]:
+            lines.append(f"  not this:   {P.label(other)} — {P.DEFINITION[other]}")
+        banned = ", ".join(f'"{w}"' for w in P.BANNED[peril])
+        lines.append(f"  Do not use the word {banned}. Do not copy the definition.")
+        lines.append("  Describe what happened in the customer's own words.")
+    else:
         lines.append("  Must not contain any word that would reveal what happened: "
                      + ", ".join(PERIL_GIVEAWAYS[peril])
                      + ". Say only that there is a problem, without naming its cause.")
@@ -461,6 +498,147 @@ def call_google(prompt):
 CALLERS = {"anthropic": call_anthropic, "openai": call_openai, "google": call_google}
 
 
+def timed_writer(writer, prompt):
+    start = time.time()
+    try:
+        return CALLERS[writer](prompt)
+    finally:
+        TIMING["writer_s"] += time.time() - start
+        TIMING["writer_calls"] += 1
+
+
+# ---------------------------------------------------------------- validation
+
+def content_words(text):
+    """Lowercase words with the filler removed, so phrases can be compared as written."""
+    words = re.findall(r"[a-z]+", text.lower().replace("'", "").replace("\u2019", ""))
+    return [w for w in words if w not in FILLER]
+
+
+def same_word(a, b):
+    """Exact for short words, loose for long ones. Loose matching on four letters turns "sure"
+    into "surge", so the length floor matters as much as the ratio."""
+    if a == b:
+        return True
+    if len(a) >= 5 and len(b) >= 5:
+        return difflib.SequenceMatcher(None, a, b).ratio() >= PARROT_RATIO
+    return False
+
+
+def run_found(message_words, phrase_words):
+    """True when the message contains those words consecutively, in order, each matched by
+    same_word."""
+    span = len(phrase_words)
+    for start in range(len(message_words) - span + 1):
+        if all(same_word(message_words[start + i], phrase_words[i]) for i in range(span)):
+            return True
+    return False
+
+
+def label_phrases(peril):
+    """The short ways the label itself gets said. The KB label, split on "/" so
+    "Drop / impact damage" gives two, plus the multi-word entries of the ban list, which are
+    the same label phrased the way a customer would. Single-word labels are left out: "wear"
+    and "battery" on their own are ordinary English."""
+    phrases = [part.strip() for part in P.label(peril).split("/")]
+    phrases += [term for term in P.BANNED[peril] if " " in term]
+    return [words for words in (content_words(p) for p in phrases) if len(words) >= 2]
+
+
+def parrot_hit(message, peril):
+    """What the message copied from the prompt, or None.
+
+    Two sources, matched as runs of consecutive words rather than as single tokens, because
+    "stolen", "lost" and "battery" are ordinary English and customers say them. What is blocked
+    is the customer categorising their own incident in the policy's terms.
+    - the label phrasing, matched whole: "environmental damage", "liquid damage".
+    - the definition text, matched at DEFINITION_RUN words: the writer copying the definition
+      instead of describing the incident. A shorter run would fire on any accurate symptom,
+      since the definitions are written out of symptom vocabulary.
+    """
+    words = content_words(message)
+    for phrase in label_phrases(peril):
+        if run_found(words, phrase):
+            return "label phrase: " + " ".join(phrase)
+    definition = content_words(P.DEFINITION[peril])
+    for start in range(len(definition) - DEFINITION_RUN + 1):
+        run = definition[start:start + DEFINITION_RUN]
+        if run_found(words, run):
+            return "definition run: " + " ".join(run)
+    return None
+
+
+def timed_judge(call):
+    start = time.time()
+    try:
+        return call()
+    finally:
+        TIMING["judge_s"] += time.time() - start
+        TIMING["judge_calls"] += 1
+
+
+def judge_label_matches(message, peril):
+    """Check B. The judge sees the KB definition of the label and of its confusable
+    neighbours, then gives its reasoning and its verdict in one call."""
+    from reward.judge import ask_with_reasoning
+    lines = ["Definitions from the policy knowledge base:",
+             f"- {P.label(peril)}: {P.DEFINITION[peril]}"]
+    for other in P.NOT_THIS[peril]:
+        lines.append(f"- {P.label(other)}: {P.DEFINITION[other]}")
+    lines.append(f"\nCustomer message: \"{message}\"")
+    return timed_judge(lambda: ask_with_reasoning(
+        f"Is this message consistent with {P.label(peril)} as defined above?", "\n".join(lines)))
+
+
+def judge_cause_visible(message):
+    """Check C, hidden-peril tasks only. A symptom is allowed; a cause is not.
+
+    The state wording is spelled out because the judge read "cause" as needing an event and let
+    "I no longer have it in my possession" through: not having the device is the loss itself,
+    however it is phrased."""
+    from reward.judge import ask_with_reasoning
+    return timed_judge(lambda: ask_with_reasoning(
+        "Can the cause of the damage or loss be determined from this message?\n"
+        "- A symptom of the device not working, such as 'won't turn on' or 'keeps freezing', "
+        "is not a cause.\n"
+        "- An event is a cause: dropping it, getting it wet, a power cut, a failed update, "
+        "someone taking it.\n"
+        "- A description of the device's current state is also a cause when that state is "
+        "itself what happened. Saying the device is missing, gone, not in the customer's "
+        "possession, or that they cannot find it, reveals loss or theft just as much as "
+        "describing the event would.",
+        f"Customer message: \"{message}\""))
+
+
+def validate(spec, sentence, use_judge):
+    """None when the sentence is accepted, else (check, detail)."""
+    if spec["stated_peril"]:
+        hit = parrot_hit(sentence, spec["peril"])
+        if hit:
+            return "A_parrot", hit
+        if use_judge:
+            verdict, reasoning = judge_label_matches(sentence, spec["peril"])
+            if verdict == "no":
+                return "B_label_body", reasoning
+    elif use_judge:
+        verdict, reasoning = judge_cause_visible(sentence)
+        if verdict == "yes":
+            return "C_cause_leak", reasoning
+    return None
+
+
+def log_rejection(out_dir, spec, sentence, attempt, check, detail):
+    entry = {"task_id": spec["task_id"], "attempt": attempt, "check": check,
+             "peril": spec["peril"], "peril_stated": spec["stated_peril"],
+             "device": spec["device"], "device_stated": spec["stated_device"],
+             "generator": spec["generator"], "detail": detail, "message": sentence}
+    with (out_dir / REJECTION_LOG).open("a") as handle:
+        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    print(f"  REJECT {spec['task_id']} [{spec['generator']}] {check} "
+          f"peril={spec['peril']}{'' if spec['stated_peril'] else ' (hidden)'}: {detail}",
+          flush=True)
+
+
 # ---------------------------------------------------------------- assembly
 
 def spec_route(spec):
@@ -470,12 +648,12 @@ def spec_route(spec):
     return route_answer(device, peril, spec["enrolled_days_ago"], spec["claims_last_12m"])
 
 
-def build_specs(count=DEFAULT_TASKS):
+def build_specs():
     """The ordered list of component draws, one per task. The route is computed first and the
     three writers rotate within each route, so every route gets an even share of all three.
     Rotating over the combination order instead left file_claim at 13 / 17 / 27."""
     rng = random.Random(SEED)
-    cells, counts = build_cells(count)
+    cells, counts = build_cells()
     specs = []
     for (stated, peril), count in zip(cells, counts):
         for _ in range(count):
@@ -490,6 +668,28 @@ def build_specs(count=DEFAULT_TASKS):
         position = seen.get(route, 0)
         spec["generator"] = WRITERS[position % len(WRITERS)]
         seen[route] = position + 1
+    return specs
+
+
+def build_topup_specs(route, count, perils, rng, first_index):
+    """Backward sampling for one route.
+
+    Forward sampling gives a route whatever share the component ratios happen to produce, which
+    left tech_support at 14 of 400. Here the route is chosen first: only what the rule chain
+    requires is fixed — the peril, and both facts stated, since every route except ask_question
+    needs them — and everything else is drawn the usual way. A draw that lands on a different
+    route is discarded rather than corrected, so the free components keep their own
+    distributions instead of being forced.
+    """
+    specs = []
+    while len(specs) < count:
+        spec = draw_components(rng, ["device", "peril"], rng.choice(perils))
+        if spec_route(spec) != route:
+            continue
+        spec["task_id"] = f"t{first_index + len(specs):03d}"
+        specs.append(spec)
+    for position, spec in enumerate(specs):
+        spec["generator"] = WRITERS[position % len(WRITERS)]
     return specs
 
 
@@ -526,7 +726,7 @@ def load_cache(out_dir):
 def write_batch(writer, numbered):
     """One batch. Whatever came back well formed is kept; each case that did not is re-requested
     on its own, so a single malformed entry costs one small call instead of the whole batch."""
-    raw = CALLERS[writer](build_prompt(numbered))
+    raw = timed_writer(writer, build_prompt(numbered))
     wanted = {number for number, _ in numbered}
     sentences, note = parse_messages(raw, wanted)
     if note:
@@ -537,7 +737,7 @@ def write_batch(writer, numbered):
         for attempt in range(1, PARSE_ATTEMPTS + 1):
             print(f"  [{writer}] re-requesting case {number} on its own "
                   f"({attempt}/{PARSE_ATTEMPTS})", flush=True)
-            single_raw = CALLERS[writer](build_prompt([(number, by_number[number])]))
+            single_raw = timed_writer(writer, build_prompt([(number, by_number[number])]))
             single, single_note = parse_messages(single_raw, {number})
             if number in single:
                 sentences[number] = single[number]
@@ -550,41 +750,124 @@ def write_batch(writer, numbered):
     return sentences
 
 
-def write_sentences(specs, out_dir):
-    """Return one sentence per spec, in spec order. Anything already in the cache is not paid
-    for again, and the cache is written after every batch."""
+def write_sentences(specs, out_dir, use_judge=True):
+    """Write, validate, and refill. Returns (accepted, failed): accepted maps task_id to an
+    accepted sentence; failed lists the specs still short after MAX_ATTEMPTS.
+
+    A rejected sentence is rewritten for the exact same combination. Nothing about the
+    combination is resampled, so the route stays what it was, and a combination that keeps
+    failing shows up as such instead of being quietly replaced."""
     cache = load_cache(out_dir)
-    todo = [spec for spec in specs if spec["task_id"] not in cache]
-    print(f"{len(specs) - len(todo)} sentences from cache, {len(todo)} to write", flush=True)
+    attempts = {spec["task_id"]: 0 for spec in specs}
+    pending = [spec for spec in specs if spec["task_id"] not in cache]
+    print(f"{len(specs) - len(pending)} sentences from cache, {len(pending)} to write",
+          flush=True)
 
-    for writer in WRITERS:
-        mine = [spec for spec in todo if spec["generator"] == writer]
-        for start in range(0, len(mine), BATCH_SIZE):
-            chunk = mine[start:start + BATCH_SIZE]
-            numbered = list(enumerate(chunk, start=1))
-            print(f"[{writer}] writing {len(chunk)} sentences "
-                  f"({start + len(chunk)}/{len(mine)})", flush=True)
-            written = write_batch(writer, numbered)
-            for number, spec in numbered:
-                cache[spec["task_id"]] = written[number]
-            (out_dir / CACHE_NAME).write_text(json.dumps(cache, ensure_ascii=False))
+    for round_number in range(1, MAX_ATTEMPTS + 1):
+        if not pending:
+            break
+        print(f"\nround {round_number}/{MAX_ATTEMPTS}: {len(pending)} to write", flush=True)
+        rejected = []
+        for writer in WRITERS:
+            mine = [spec for spec in pending if spec["generator"] == writer]
+            for start in range(0, len(mine), BATCH_SIZE):
+                chunk = mine[start:start + BATCH_SIZE]
+                numbered = list(enumerate(chunk, start=1))
+                print(f"[{writer}] writing {len(chunk)} sentences "
+                      f"({start + len(chunk)}/{len(mine)})", flush=True)
+                written = write_batch(writer, numbered)
+                for number, spec in numbered:
+                    sentence = written[number]
+                    attempts[spec["task_id"]] += 1
+                    problem = validate(spec, sentence, use_judge)
+                    if problem is None:
+                        cache[spec["task_id"]] = sentence
+                    else:
+                        log_rejection(out_dir, spec, sentence, attempts[spec["task_id"]],
+                                      *problem)
+                        rejected.append(spec)
+                (out_dir / CACHE_NAME).write_text(json.dumps(cache, ensure_ascii=False))
+        pending = rejected
 
-    return [cache[spec["task_id"]] for spec in specs]
+    return cache, pending
+
+
+def split_by_route(records, splits):
+    """Stratify the split by route: take 80 / 10 / 10 out of each route separately, so every
+    route appears in train, val and test.
+
+    Splitting the whole set at once puts the same fractions in each file overall but not within
+    a small route: on v3 that left refer_to_manufacturer with nothing in test and tech_support
+    with nothing in val. Rounding each route on its own does not add up to 320 / 40 / 40 by
+    itself, so a correction pass moves single records between files, always from a route that
+    can spare one, until the totals are exact."""
+    names = [name for name, _ in splits]
+    targets = {name: size for name, size in splits}
+
+    out = {name: [] for name in names}
+    for route in sorted({record["route_answer"] for record in records}):
+        mine = sorted((r for r in records if r["route_answer"] == route),
+                      key=lambda r: r["task_id"])
+        taken = 0
+        for name, count in zip(names, largest_remainder(len(mine), [8, 1, 1])):
+            out[name].extend(mine[taken:taken + count])
+            taken += count
+
+    # Correction: move one record at a time from an over-full file to a short one, taking it
+    # from the largest route in that file so no route is emptied.
+    for _ in range(len(records)):
+        over = next((n for n in names if len(out[n]) > targets[n]), None)
+        under = next((n for n in names if len(out[n]) < targets[n]), None)
+        if over is None or under is None:
+            break
+        counts = {}
+        for record in out[over]:
+            counts.setdefault(record["route_answer"], []).append(record)
+        donor = max(counts.values(), key=len)
+        moved = donor[-1]
+        out[over].remove(moved)
+        out[under].append(moved)
+
+    for name in names:
+        assert len(out[name]) == targets[name], \
+            f"{name}: {len(out[name])} records, expected {targets[name]}"
+    return out
+
+
+def report_failures(failed, out_dir):
+    """Which cells are short after the retry cap, and what the log says went wrong."""
+    print(f"\n{len(failed)} combinations still short after {MAX_ATTEMPTS} attempts. "
+          f"No split files written. See {out_dir / REJECTION_LOG}.")
+    reasons = {}
+    for line in (out_dir / REJECTION_LOG).read_text().splitlines():
+        entry = json.loads(line)
+        reasons.setdefault(entry["task_id"], []).append(entry["check"])
+    for spec in failed:
+        states = ("device" if spec["stated_device"] else "-") + "/" + \
+                 ("peril" if spec["stated_peril"] else "-")
+        print(f"  {spec['task_id']}  cell {states} x {spec['peril']:<12} "
+              f"route={spec_route(spec):<24} [{spec['generator']}]  "
+              f"failed checks: {', '.join(reasons.get(spec['task_id'], []))}")
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--smoke", action="store_true",
                         help="generate two tasks per route, print them, write no files")
-    parser.add_argument("--count", type=int, default=DEFAULT_TASKS,
-                        help="how many tasks to generate (a multiple of ten)")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT,
-                        help="directory for the split files and the sentence cache")
+                        help="directory for the split files, the sentence cache, and the "
+                             "rejection log")
+    parser.add_argument("--show-prompt", action="store_true",
+                        help="print the writer prompt for the first smoke batch and exit; "
+                             "no API calls are made")
+    parser.add_argument("--no-judge", action="store_true",
+                        help="skip the two judge checks and run only the parrot check; for "
+                             "testing when Ollama is not available")
     args = parser.parse_args()
 
-    splits = split_sizes(args.count)
+    splits = split_sizes(T.total())
     args.out.mkdir(parents=True, exist_ok=True)
-    specs = build_specs(args.count)
+    specs = build_specs()
     if args.smoke:
         # Two tasks per route. The start position is offset per route, because taking the first
         # two of every route only ever lands on rotation positions 0 and 1 and would show two
@@ -599,24 +882,28 @@ def main():
                 picked.append(index)
         specs = [specs[i] for i in picked]
 
-    sentences = write_sentences(specs, args.out)
-    records = [make_record(spec, sentence) for spec, sentence in zip(specs, sentences)]
+    if args.show_prompt:
+        first = [spec for spec in specs if spec["generator"] == WRITERS[0]][:BATCH_SIZE]
+        print(build_prompt(list(enumerate(first, start=1))))
+        return
+
+    if args.no_judge:
+        print("WARNING: --no-judge set; checks B and C are skipped, only the parrot check runs",
+              flush=True)
+    accepted, failed = write_sentences(specs, args.out, use_judge=not args.no_judge)
+    if failed:
+        report_failures(failed, args.out)
+        print(f"\nwriter: {TIMING['writer_calls']} calls, {TIMING['writer_s']/60:.1f} min")
+        print(f"judge:  {TIMING['judge_calls']} calls, {TIMING['judge_s']/60:.1f} min")
+        sys.exit(1)
+    records = [make_record(spec, accepted[spec["task_id"]]) for spec in specs]
 
     if args.smoke:
         for record in records:
             print(json.dumps(record, indent=1, ensure_ascii=False))
         return
 
-    # Proportional stratified split. Records are already in cell order, so walking them with a
-    # repeating 8 train / 1 val / 1 test pattern takes the same fractions out of every cell and
-    # lands on exactly 80 / 10 / 10 of the run. Rounding each cell on its own does not: the
-    # leftovers accumulate and the totals drift.
-    pattern = ["tasks_train.jsonl"] * 8 + ["tasks_val.jsonl", "tasks_test.jsonl"]
-    out = {name: [] for name, _ in splits}
-    for position, record in enumerate(records):
-        out[pattern[position % len(pattern)]].append(record)
-    for name, expected in splits:
-        assert len(out[name]) == expected, f"{name}: {len(out[name])} records, expected {expected}"
+    out = split_by_route(records, splits)
 
     for name, expected in splits:
         path = args.out / name
@@ -624,6 +911,9 @@ def main():
             for record in out[name]:
                 handle.write(json.dumps(record, ensure_ascii=False) + "\n")
         print(f"{path}: {len(out[name])} records (target {expected})")
+
+    print(f"\nwriter: {TIMING['writer_calls']} calls, {TIMING['writer_s']/60:.1f} min")
+    print(f"judge:  {TIMING['judge_calls']} calls, {TIMING['judge_s']/60:.1f} min")
 
 
 if __name__ == "__main__":

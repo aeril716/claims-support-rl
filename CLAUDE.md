@@ -153,6 +153,35 @@ because they are the gold cases for several routes:
 
 Only impossible account states are excluded, never uncovered situations.
 
+### Target distribution, validation, and refill
+Cell counts do not come from the weights at run time. They are written out explicitly in
+`data/target_distribution.py`: v1's 400-task distribution, with loss and theft removed from the
+two hidden-peril columns (for those perils the cause and the observable state are the same
+fact, so a hidden-cause message cannot be written without leaking) and their share spread over
+the other nine. The weights above still describe the intent; the file is the number.
+
+Every generated sentence passes three checks before it is accepted, and every rejection is
+logged to `rejections.jsonl` next to the output with the task id, the check, the peril, and the
+text:
+- A, code: the peril code word or its KB label phrasing appears in the message, allowing for
+  misspellings ("malfuctioning", "enviromental", "serge").
+- B, judge: the message is not consistent with its peril label, given the KB definition of the
+  label and of its nearest confusable perils.
+- C, judge, hidden-peril tasks only: the cause can be determined from the message. A symptom
+  ("won't turn on") passes; a cause ("I dropped it") fails.
+
+A rejected sentence is rewritten for the exact same combination — device, account, peril, what
+the customer stated — and only the writer runs again. The route is a deterministic function of
+the combination, so resampling any part of it would change the answer key. Five attempts per
+combination; a combination still short after that is reported with its cell and the checks it
+failed, no split files are written, and nothing is substituted.
+
+The writer prompt gives no example sentences. For a stated peril it gives the KB definition,
+verbatim from `data/kb/04_perils.md`, the nearest confusable peril with its own KB definition as
+"not this", and a ban on the code word and its label phrasing. All three readers of a
+definition — the writer, check A, and the judge — get it from `data/peril_definitions.py`, which
+reads the KB file rather than restating it.
+
 ### Account consistency
 Account fields are sampled independently, so some combinations are impossible and must be
 corrected after sampling:
@@ -166,32 +195,42 @@ prints any rule violations.
 
 ### route_answer rule
 Code sets `route_answer` by checking the rules top to bottom. The first match wins and the
-remaining rules are not evaluated.
+remaining rules are not evaluated. This is the order in `data/generate_tasks.py` and the one
+the task files in the repo were labeled with (relabeled on 2026-09-13; the waiting-period rule
+used to sit second).
 1. `device` is null or `peril` is null → `ask_question`
    (there is no date field: the incident date is collected when the claim is actually filed,
    and `account.enrolled_days_ago` already fixes the timing)
-2. `enrolled_days_ago` < 31 → `explain_waiting_period`
-3. peril the plan can handle neither as a claim nor through tech support
+2. peril the plan can handle neither as a claim nor through tech support
    (e.g. loss / theft on a non-phone) → `explain_not_covered`
    (that is the definition of the rule, not a list with an exception attached. Software
    falls outside it: `data/kb/13_data_and_software.md` states that software problems are
    not claims and are handled by tech support at no charge, so software has a route of its
    own rather than being a dead end)
-4. software problem → `tech_support`
+3. software problem → `tech_support`
    (`data/kb/12_tech_support.md` and `data/kb/13_data_and_software.md` both say software
-   problems are handled by tech support at no charge. Not covered by the claim process and not
-   handled at all are two different things)
-5. peril is malfunction / wear / environment and the device is still inside the manufacturer's
+   problems are handled by tech support at no charge, and `03_enrollment_and_waiting_period.md`
+   says tech support starts the day of enrollment with no waiting period. Not covered by the
+   claim process and not handled at all are two different things)
+4. peril is malfunction / wear / environment and the device is still inside the manufacturer's
    warranty (`enrolled_days_ago` < 365; warranty is 12 months from purchase and enrollment
    happens within 30 days of purchase, so enrolled_days_ago is a close proxy) → `refer_to_manufacturer`
-6. `claims_last_12m` at or over the limit for that device → `escalate`
+   (`data/kb/10_manufacturer_warranty_interaction.md`: the manufacturer is responsible for
+   defects while its warranty is active, regardless of plan coverage)
+5. `claims_last_12m` at or over the limit for that device → `escalate`
    (phone 3, laptop / tablet / watch 2, per `data/kb/07_claim_limits.md`; read the limit from
-   the task's device, never hardcode 3. This sits directly above the fallback because the limit
-   only applies to claims the plan would actually take. A peril the plan does not cover, or one
-   the manufacturer is responsible for, never consumes a claim: `data/kb/07_claim_limits.md`
-   states that a denied claim does not count toward the limit. So the rules that decide whether
-   this is a plan claim at all are checked before the limit is read. Account consistency sets
-   `claims_last_12m` to 0 whenever `enrolled_days_ago` < 31, so rules 2 and 6 never both apply)
+   the task's device, never hardcode 3. The limit only applies to claims the plan would
+   actually take. A peril the plan does not cover, or one the manufacturer is responsible for,
+   never consumes a claim: `data/kb/07_claim_limits.md` states that a denied claim does not
+   count toward the limit. So the rules that decide whether this is a plan claim at all are
+   checked before the limit is read)
+6. `enrolled_days_ago` < 31 → `explain_waiting_period`
+   (only reached when the incident would otherwise be a covered claim: physical perils, and
+   loss or theft on a phone. Software, warranty defects, and non-phone loss/theft have their
+   own answers above and do not depend on the waiting period, which the KB confirms: tech
+   support has no waiting period, the manufacturer handles warranty defects, and non-phone
+   loss/theft is excluded permanently. Account consistency sets `claims_last_12m` to 0
+   whenever `enrolled_days_ago` < 31, so rules 5 and 6 never both apply)
 7. otherwise → `file_claim`
 
 Why this order. Reaching the claim limit is not automatically a refusal: repeated failures on
@@ -199,7 +238,9 @@ the same device may be a defective unit or a manufacturer warranty matter, and d
 requires seeing what the earlier claims were, which the chatbot cannot do. So the case goes to
 a human. But asking for the missing device and peril comes first, because a human cannot pick
 the case up without them, and the chatbot can collect them in the turn it already has.
-Collecting information comes before deciding where a case goes. What the reply asks and how it
+Collecting information comes before deciding where a case goes. The waiting period comes last
+among the decisions because it only defers a claim the plan would take; every other rule
+settles the case on grounds the waiting period does not change. What the reply asks and how it
 is worded is not decided here; that is the rubric's job.
 
 ### Task record format (`data/tasks_*.jsonl`, one JSON object per line)
@@ -265,9 +306,11 @@ via the route_answer rule under Data generation
 - Reply checks: code checks + judge yes/no per rubric item as before.
 - Combined as in the formula under "What we are building". Weights may change.
 
-Judge: `Qwen2.5-14B-Instruct` served locally on the user's Mac via Ollama (M5 Pro, 48 GB).
-Training runs on Colab; the Colab notebook calls the Mac judge over HTTP through a tunnel
-(ngrok or similar). This wiring is not built yet.
+Judge: `qwen3:30b-a3b`, served by Ollama on a separate machine on the local network at
+`192.168.88.59:11434`, called through `/api/generate` with a `format` JSON schema that
+constrains every reply to `{"reasoning": <string>, "verdict": "yes" | "no"}`. One rubric item
+is one call. The judge was `Qwen2.5-32B-Instruct` on the Mac until the swap measured in Lessons
+learned. Training runs on Colab; how the Colab notebook reaches the judge is not built yet.
 
 <!-- Copy this block verbatim into README.md when the README is written. -->
 ## Rubric rule: a task never carries a fact the customer did not state
@@ -322,6 +365,28 @@ Every item is one object with four fields:
 Exception, carried over from the earlier assembly rules: when both `device` and `peril` are
 null the customer has stated nothing, so the "already gave" item is not attached. An item that
 always passes is free credit and inflates the reward.
+
+One more judge item is added at scoring time to every task, after the stored rubric:
+
+| question | check | expect |
+|---|---|---|
+| The agent chose the route R, which means M. Does the reply tell the customer something consistent with that, rather than the opposite? | judge | yes |
+
+It is not stored on the task because it depends on the route the model chose, which does not
+exist until the completion does. R is the chosen route and M its meaning from `ROUTE_MEANING`
+in `reward/reward.py`. It was added after a completion chose `file_claim` correctly and then
+told the customer the incident was not covered; route correctness and reply quality were judged
+separately, so nothing caught the contradiction. A route that is not in `ROUTES` fails this
+item without a judge call.
+
+**Reading the model's output.** The policy must emit one JSON object. Output that is
+recognisably that object with one of three syntax slips — an unquoted string value, a stray `]`,
+a missing closing brace — is repaired and scored on the repaired text. Output that is not a JSON
+object at all scores 0; the parser never scans loose text for a route name, since that would
+let it invent an answer the model never committed to. Every repair is logged with the original
+text and whether the recovered route was correct, because the advantage lands on the tokens the
+model actually emitted, so a syntax slip on correct content gets reinforced with it. No format
+penalty for now; the repair rate is watched across runs instead.
 
 ### Per-route items
 
@@ -452,6 +517,40 @@ support-rl-env/
 ```
 
 `README.md` and `results/reward_hacks.md` are the files a reviewer will actually read.
+
+## Lessons learned
+
+Short factual notes, each with the measurement behind it. The README carries the ones a
+reviewer needs; these are the ones that changed how the pieces here are built.
+
+- Ollama's `think: false` option is silently ignored on the judge box, because its models were
+  imported from raw GGUF and the thinking switch is not in the template. Appending " /think" to
+  the prompt narrowed output from a 10x spread to about 3.7x but did not eliminate it: 29 of 176
+  calls still exceeded the expected range, up to 4,013 tokens. Why the string works in the
+  opposite direction to its name was never established.
+- Constraining the judge with Ollama's `format` JSON schema solved what prompt wording could
+  not. Output tokens went from a 206–4,013 range to 139–318, latency from a 4.2s median to about
+  0.9s, and the 8 unparseable replies out of 176 became structurally impossible because
+  `verdict` is an enum. On this box the constrained output lands in the reply's `thinking`
+  field, not `response`.
+- Batching all rubric items into one judge call was measured and rejected. Only 1.4x faster
+  (23 calls at 112.6s against 176 at 155.1s), and 18% of verdicts changed. Same model, same
+  temperature, same questions; the only difference was other questions sharing the prompt.
+  Items with open-ended judgement moved most (`ask_question.no_assertion` 38% agreement,
+  `missing.none` 47%); items checking for specific content in the reply stayed at 100%. Batched
+  and per-item scoring should be treated as two different graders. `ask_batch` stays in
+  `reward/judge.py`, unused.
+- The judge model swap (`qwen2.5:32b` local to `qwen3:30b-a3b` remote) agreed 88.1% over 168
+  verdicts. Route-specific rubric items agreed 100%; the disagreement concentrated in
+  `common.no_reask` (64%) and `common.on_topic` (70%). On `no_reask` the new judge flipped all 6
+  disagreements from no to yes, so it applies a broader standard for "asked something the
+  customer already said".
+
+## Current state
+
+Where the training track stands, machines, run names, tooling, and the next step are kept in
+`NOTES.md` (uncommitted, dated at the top). Read it before touching `train/`, `reward/`, or the
+GPU server.
 
 ## Not decided yet
 
