@@ -217,7 +217,8 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
   repo at commit 8d9e034 (code, KB versions, relabeled splits all committed there); the
   earlier Drive bundle step is gone.
 - Judge backend switch in reward/judge.py: `JUDGE_BACKEND=ollama` (default, runs 1-7) or
-  `anthropic` (Messages API, `claude-haiku-4-5`, temperature 0, same prompt text, JSON parsed
+  `anthropic` (Messages API, `claude-haiku-4-5`, no sampling parameters because anthropic 1.x
+  removed `temperature` from messages.create, same prompt text, JSON parsed
   from the reply text, SDK retries 5, at most 4 calls in flight). `reward/trl_rewards.py`
   scores completions in a thread pool only on the anthropic backend. Every summary.json now
   records the judge backend and model (`judge.backend`, `judge.model`); the trainer also

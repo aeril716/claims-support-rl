@@ -67,11 +67,13 @@ def _call_anthropic(prompt, accept):
     Same prompt text as the ollama path; the schema is asked for in the prompt and checked by
     `accept` after parsing, since the Messages API does not constrain the output."""
     client = _anthropic_client()
+    # No sampling parameters: anthropic 1.x removed `temperature` from messages.create (it is
+    # rejected as an unexpected keyword). The verdict is constrained to yes/no by the prompt
+    # and checked by `accept`, so determinism is not relied on.
     with _SEMAPHORE:
         response = client.messages.create(
             model=ANTHROPIC_MODEL,
             max_tokens=ANTHROPIC_MAX_TOKENS,
-            temperature=0,
             messages=[{"role": "user", "content": prompt}],
         )
     text = "".join(block.text for block in response.content if block.type == "text").strip()
