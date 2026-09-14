@@ -218,6 +218,26 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
   Files `out/teacher_v8reason_train_r3.jsonl`, `data/sft/train_v8reason_r3.jsonl`. Script:
   `--task-ids` for stratified dry runs, `--teacher-suffix` repeatable (one line each).
 
+## Judge agreement, Haiku vs ollama (2026-09-14 13:40)
+- `eval/judge_agreement.py score` runs reward.score on a set of completions with the active
+  JUDGE_BACKEND and stores per-item verdicts; `compare` joins two such files and prints per-
+  item pass rates and agreement (both yes or both no), flagging items under 70%. Ollama ran
+  on the GPU server (the judge box is LAN-only); Haiku ran on the Mac. Tables in
+  `out/judge_agreement/` (verdict jsonl files and the two markdown tables, force-added).
+- 40 kept r3 teacher completions (seed-0 sample; 39 distinct tasks, 353 verdicts): rubric
+  mean Haiku 0.927 vs ollama 0.967, agreement 0.93. Below 70%: refer_to_manufacturer.why
+  (Haiku 0/4, ollama 4/4, agreement 0.00), explain_not_covered.grounded (4/6 vs 5/6, 0.50),
+  file_claim.how_to_start (4/6 vs 3/6, 0.50). Ollama is the more lenient judge on the
+  common items (no_reask 39/39 vs 35/39, on_topic 38/39 vs 33/39).
+- 40 base outputs, 14B v8 on the stratified test (366 verdicts): rubric mean Haiku 0.790 vs
+  ollama 0.810, agreement 0.90. Below 70%: ask_question.no_assertion (4/6 vs 6/6),
+  escalate.handed_to_person (4/6 vs 2/6), explain_not_covered.grounded (1/6 vs 1/6, 0.67),
+  explain_not_covered.not_covered (5/6 vs 3/6), peril.environment (1/2 vs 0/2),
+  peril.loss (1/1 vs 0/1). Route-content items with fixed wording (deductible, documentation,
+  how_to_start on base, tech_support items, missing.*) agree at or near 100%; the judgment
+  items (why, grounded, no_assertion, no_reask, on_topic) carry the disagreement, matching
+  the 2026-09-11 swap measurement.
+
 ## Colab runs 8 and 9 (14B, A100 80GB, judge claude-haiku-4-5)
 Both trained on the relabeled sub35 with the run4 settings (8 generations, batch 2x4, beta 0,
 seed 42, 35 steps, LoRA r=16), Qwen2.5-14B-Instruct in bf16. Rubric scores below are from
