@@ -176,13 +176,15 @@ def main():
                 print(f"  scored {i}/{n}", flush=True)
         scored = [r["rubric_score"] for r in records if r.get("rubric_score") is not None]
         summary["judge"] = judge_info()
+        summary["judge_failures"] = summary["judge"]["judge_failures"]
         summary["rubric_pass_rate_mean"] = sum(scored) / len(scored) if scored else None
         summary["rubric_scored_outputs"] = len(scored)
         summary["item_pass"] = {k: {"passed": v[0], "total": v[1]} for k, v in sorted(item_pass.items())}
         summary["scoring_seconds"] = round(time.time() - t0)
         write(args.out, summary, records)
         print(f"  rubric pass rate (mean over {summary['rubric_scored_outputs']} parsed outputs): "
-              f"{summary['rubric_pass_rate_mean']:.3f}   judge {summary['judge']}   {summary['scoring_seconds']} s")
+              f"{summary['rubric_pass_rate_mean']:.3f}   judge {summary['judge']}   {summary['scoring_seconds']} s"
+              f"   judge_failures {summary['judge_failures']}")
 
 
 if __name__ == "__main__":

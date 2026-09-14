@@ -232,6 +232,12 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
   unscored summary.json right after generation, scores as a second phase, and has
   `--rescore --out <dir>` to judge a saved outputs.json without regenerating; per-item
   verdicts with reasoning are stored per record under `items`.
+- Anthropic backend, second hardening (a Colab rescore died at 20/40 on a reply cut at
+  max_tokens): max_tokens 1024 and "keep reasoning to one sentence" in the prompt suffix; a
+  reply that does not parse or was cut off is asked once more with a stricter form; if that
+  fails too the item gets verdict "no" with reasoning "judge_parse_failure" and the run goes
+  on. The count is `judge_failures` in every summary.json (and inside the trainer's judge
+  block); it is 0 on the ollama path by construction.
 - Runs 8-9 (Colab) use claude-haiku-4-5 as judge, so their rubric scores are not comparable
   with runs 3-7 (qwen3:30b-a3b); route accuracy is comparable.
 - New trainer flags: `--model` (default Qwen2.5-7B-Instruct), `--bf16` (fp16 otherwise; the

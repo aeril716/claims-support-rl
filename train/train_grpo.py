@@ -517,6 +517,7 @@ def main():
                           "beta": args.beta, "seed": args.seed, "max_steps": args.steps},
                "generate": TIMING,
                "judge": {**J.judge_info(), **{k: v for k, v in R.TIMING.items() if k != "judge_each_s"}},
+               "judge_failures": J.judge_failures(),
                "judge_each_s": R.TIMING["judge_each_s"],
                "steps": timing.rows, "log_history": trainer.state.log_history,
                "repairs": R.REPAIRS}

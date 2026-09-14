@@ -36,7 +36,13 @@ KEEP_ALIVE = "30m"          # a cold load costs about 40 seconds; keep the model
 TIMEOUT_S = 600
 
 ANTHROPIC_MODEL = "claude-haiku-4-5"
-ANTHROPIC_MAX_TOKENS = 400
+ANTHROPIC_MAX_TOKENS = 1024   # room for a long reasoning; a reply cut at max_tokens is retried
+
+# Replies the anthropic backend could not parse even after one retry. Each such item gets the
+# verdict "no" with reasoning "judge_parse_failure" so a run continues; the count goes into
+# summary.json as judge_failures.
+FAILURES = {"count": 0}
+_FAILURES_LOCK = threading.Lock()
 MAX_PARALLEL = 4            # concurrent Anthropic calls; the scorer fans out over completions
 _SEMAPHORE = threading.Semaphore(MAX_PARALLEL)
 _ANTHROPIC_CLIENT = None
@@ -44,10 +50,11 @@ _CLIENT_LOCK = threading.Lock()
 
 
 def judge_info():
-    """Which backend and model are judging, for run summaries."""
+    """Which backend and model are judging, for run summaries, plus the parse-failure count
+    (always 0 on the ollama path, whose schema makes an unparseable reply impossible)."""
     if BACKEND == "anthropic":
-        return {"backend": "anthropic", "model": ANTHROPIC_MODEL}
-    return {"backend": "ollama", "model": MODEL, "endpoint": ENDPOINT}
+        return {"backend": "anthropic", "model": ANTHROPIC_MODEL, "judge_failures": FAILURES["count"]}
+    return {"backend": "ollama", "model": MODEL, "endpoint": ENDPOINT, "judge_failures": 0}
 
 
 def _anthropic_client():
@@ -63,19 +70,15 @@ def _anthropic_client():
         return _ANTHROPIC_CLIENT
 
 
-def _call_anthropic(prompt, accept):
-    """POST one prompt to the Messages API and return the JSON object in the reply text.
-    Same prompt text as the ollama path; the schema is asked for in the prompt and checked by
-    `accept` after parsing, since the Messages API does not constrain the output."""
+def _anthropic_once(content):
+    """One Messages API call; returns (text, stop_reason). No sampling parameters: anthropic
+    1.x removed `temperature` from messages.create."""
     client = _anthropic_client()
-    # No sampling parameters: anthropic 1.x removed `temperature` from messages.create (it is
-    # rejected as an unexpected keyword). The verdict is constrained to yes/no by the prompt
-    # and checked by `accept`, so determinism is not relied on.
     with _SEMAPHORE:
         response = client.messages.create(
             model=ANTHROPIC_MODEL,
             max_tokens=ANTHROPIC_MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt + ANTHROPIC_SUFFIX}],
+            messages=[{"role": "user", "content": content}],
         )
     text = "".join(block.text for block in response.content if block.type == "text").strip()
     LAST.clear()
@@ -83,13 +86,43 @@ def _call_anthropic(prompt, accept):
                  "input_tokens": response.usage.input_tokens,
                  "output_tokens": response.usage.output_tokens,
                  "stop_reason": response.stop_reason})
-    obj = _first_object(text, accept)
+    return text, response.stop_reason
+
+
+def _call_anthropic(prompt, accept):
+    """Return the JSON object in the judge's reply. Same prompt text as the ollama path plus
+    ANTHROPIC_SUFFIX; the schema is asked for in the prompt and checked by `accept` after
+    parsing, since the Messages API does not constrain the output. A reply that does not parse
+    (or was cut at max_tokens) is asked once more with a stricter instruction; if that fails
+    too, the item is recorded as a parse failure with verdict "no" and the run goes on."""
+    text, stop = _anthropic_once(prompt + ANTHROPIC_SUFFIX)
+    obj = _first_object(text, accept) if stop != "max_tokens" else None
     if obj is not None:
         return obj
-    raise ValueError(f"judge reply carried no schema-shaped JSON: {text[:200]!r}")
+    retry = prompt + ANTHROPIC_RETRY_SUFFIX
+    text2, stop2 = _anthropic_once(retry)
+    obj = _first_object(text2, accept) if stop2 != "max_tokens" else None
+    if obj is not None:
+        LAST["retried"] = True
+        return obj
+    with _FAILURES_LOCK:
+        FAILURES["count"] += 1
+    LAST.update({"parse_failure": True, "first_reply": text[:300], "second_reply": text2[:300]})
+    return {"reasoning": "judge_parse_failure", "verdict": "no"}
 
 
-ANTHROPIC_SUFFIX = "\n\nReply with only the JSON object, no code fences."
+def judge_failures():
+    """How many items fell back to the parse-failure verdict so far in this process."""
+    return FAILURES["count"]
+
+
+ANTHROPIC_SUFFIX = ("\n\nReply with only the JSON object, no code fences. "
+                    "Keep \"reasoning\" to one sentence.")
+ANTHROPIC_RETRY_SUFFIX = (
+    "\n\nAnswer with exactly one JSON object and nothing else, in this form: "
+    '{"reasoning": "<one short sentence>", "verdict": "yes"} or '
+    '{"reasoning": "<one short sentence>", "verdict": "no"}. '
+    "No code fences, no text before or after the object, and keep the reasoning under 30 words.")
 
 
 def _strip_fences(text):
