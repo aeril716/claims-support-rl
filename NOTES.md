@@ -1,4 +1,4 @@
-# Working notes (state as of 2026-09-14 04:20, uncommitted)
+# Working notes (state as of 2026-09-14 (runs 8-9 added, tables pending), uncommitted)
 
 Continuity notes for the training track. CLAUDE.md is the design; this file is where things
 stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2 datasets).
@@ -152,6 +152,56 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
   rebuild the test first; `out/grpo_run8_v5` left as is: train.log and an empty completions
   dir). Setup was run4 settings + `--prompt-version v5` on the relabeled sub35; the log
   confirmed v5 and 35 rows. Not rerun yet.
+
+## Teacher dataset for distillation SFT (2026-09-14, no training yet)
+- `scripts/make_teacher_sft.py`: teacher claude-sonnet-5 (newest Sonnet on the key; the
+  models endpoint lists claude-sonnet-5, 4-6, 4-5), fed exactly the v8 + reasoning prompt as
+  system and user messages from train_grpo.load_tasks, never the label. 3 samples per task
+  on the 307-task train split, max_tokens 800, thinking disabled, system prompt cached.
+  Sonnet 5 rejects `temperature` ("deprecated for this model"), so the samples are the API's
+  default sampling; the three per task still differ. 921 calls, 16.1 min, $3.65 (3.69M
+  cached-read tokens, 0.11M uncached in, 0.27M out).
+- Rejection sampling on route == gold: first-sample accuracy 271/307 (ask 103/128, file 45/45,
+  not_covered 36/36, escalate 26/28, refer 21/30, waiting 13/13, tech 27/27); 281/307 tasks
+  have at least one kept sample; 26 have none (22 ask_question, 20 of them peril-null
+  device-stated where the teacher decided instead of asking; 4 refer, three of them phones at
+  the claim limit that it escalated, plus t110). Parse rate 921/921, 8 kept completions had
+  fences or prose stripped, mean output 292 tokens, none hit max_tokens.
+- Files: `out/teacher_v8reason_train.jsonl` (all 921 samples, raw text, parsed route, kept
+  flag; force-added under the ignored out/) and `data/sft/train_v8reason.jsonl` (557 kept,
+  at most 2 per task, identical completions removed; "prompt" is the Qwen chat-template
+  rendering the student trains on, "completion" the teacher's JSON object).
+- Reply quality, 40 random kept completions judged by claude-haiku-4-5 (same judge as runs
+  8-9): rubric 0.852 vs the 14B base's 0.793. Weak items: common.word_count 13/40 (the teacher
+  writes long replies), explain_not_covered.grounded 2/7, refer_to_manufacturer.why 2/4,
+  ask_question.no_assertion 8/12. Route-specific content items are near 100%.
+
+## Colab runs 8 and 9 (14B, A100 80GB, judge claude-haiku-4-5)
+Both trained on the relabeled sub35 with the run4 settings (8 generations, batch 2x4, beta 0,
+seed 42, 35 steps, LoRA r=16), Qwen2.5-14B-Instruct in bf16. Rubric scores below are from
+the Haiku judge and are not comparable with runs 3-7 (qwen3:30b-a3b); route accuracy is.
+Two earlier run8 launches died at step 6 with the same judge parse error because the
+notebook's clone cell still pinned f4708b0, from before the a4d8602 fix; the runs below are
+from a checkout at or after a4d8602.
+
+- run8 `grpo_run8_14b_v5` (prompt v5): route on the stratified test 29/40 -> 28/40. Wall
+  36.9 min, peak 38.65 GiB, 1944 judge calls, judge 37.5 min against generate 14.6 min
+  (judge time overlaps generation across the thread pool), judge_failures 0.
+  Per-route before/after and rubric pass rate: PLACEHOLDER, fill from
+  `eval_base14b_v5_test3/summary.json` and `eval_run8_ckpt35_v5_test3/summary.json` on Drive.
+- run9 `grpo_run9_14b_v8` (prompt v8): route 31/40 -> 32/40. Wall 32.0 min, peak 37.18 GiB,
+  generate 11.9 min, judge 37.2 min, judge_failures 0. Its last step had all 8 completions on
+  `file_claim` for a watch at its claim limit: route reward std 0, summed reward std above 0
+  from the rubric, so `frac_reward_zero_std` stayed 0 all run (see README Lessons learned).
+  Per-route before/after and rubric pass rate: PLACEHOLDER, fill from
+  `eval_base14b_v8_test3/summary.json` and `eval_run9_ckpt35_v8_test3/summary.json` on Drive.
+- Base pass@16 on the sub35 training set under v8 (`out/passk_base14b_v8_sub35`, on Drive,
+  not yet in the repo): buckets by gold hits of 16: 0/16 = 12 tasks (all five escalate tasks
+  among them), 16/16 = 12, 4-12 = 5, so about 10 of 35 steps had contrast. explain_not_covered
+  has no mixed task on sub35 (16, 13, 2, 0 of 16); the mixed tasks are ask_question,
+  explain_waiting_period, and file_claim. Full table and bucket list: PLACEHOLDER, paste the
+  `eval/passk_buckets.py` output for that file.
+- run9 adapter pass@k on sub35: pending (checkpoint run not finished).
 
 ## Label fix and split rebuild (2026-09-13 17:15)
 - `route_answer` in data/generate_tasks.py reordered: ask_question -> explain_not_covered ->
