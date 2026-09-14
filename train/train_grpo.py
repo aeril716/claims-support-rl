@@ -422,6 +422,9 @@ def main():
     parser.add_argument("--model", default=MODEL, help="policy model id (default Qwen2.5-7B-Instruct)")
     parser.add_argument("--bf16", action="store_true",
                         help="train in bfloat16 instead of float16 (A100/H100; the Quadro RTX 8000 has no bf16)")
+    parser.add_argument("--init-adapter", default=None,
+                        help="start from this LoRA checkpoint directory (loaded with PeftModel, trainable) "
+                             "instead of a fresh adapter; everything else is unchanged")
     parser.add_argument("--batch", type=int, default=2, help="per_device_train_batch_size")
     parser.add_argument("--accum", type=int, default=4, help="gradient_accumulation_steps")
     parser.add_argument("--gens", type=int, default=8, help="num_generations (completions per prompt)")
@@ -475,7 +478,10 @@ def main():
         output_dir=str(out),
         fp16=not args.bf16,
         bf16=args.bf16,
-        model_init_kwargs={"dtype": dtype, "attn_implementation": "sdpa"},
+        # TRL loads the model from the id with these kwargs; when --init-adapter hands it an
+        # already-built PeftModel it raises if they are set, so they are None in that case and
+        # the same dtype/attention are applied when the base is loaded below.
+        model_init_kwargs=None if args.init_adapter else {"dtype": dtype, "attn_implementation": "sdpa"},
         gradient_checkpointing=True,
         num_generations=args.gens,
         max_completion_length=256,
@@ -499,15 +505,33 @@ def main():
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
     )
     timing = StepTiming()
-    trainer = GRPOTrainer(
-        model=args.model,
-        reward_funcs=[recording(trl_rewards.route_reward), recording(trl_rewards.rubric_reward)],
-        args=config,
-        train_dataset=dataset,
-        processing_class=tokenizer,
-        peft_config=lora,
-        callbacks=[timing],
-    )
+    if args.init_adapter:
+        # Continue from an existing LoRA: load the base the way TRL would (dtype, sdpa), wrap it
+        # with the saved adapter as a trainable PeftModel, and hand that to the trainer without a
+        # peft_config, so no fresh adapter is created. The LoRA shape comes from the checkpoint.
+        from peft import PeftModel
+        from transformers import AutoModelForCausalLM
+        base = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype, attn_implementation="sdpa")
+        policy = PeftModel.from_pretrained(base, args.init_adapter, is_trainable=True)
+        print(f"init adapter: {args.init_adapter}", flush=True)
+        trainer = GRPOTrainer(
+            model=policy,
+            reward_funcs=[recording(trl_rewards.route_reward), recording(trl_rewards.rubric_reward)],
+            args=config,
+            train_dataset=dataset,
+            processing_class=tokenizer,
+            callbacks=[timing],
+        )
+    else:
+        trainer = GRPOTrainer(
+            model=args.model,
+            reward_funcs=[recording(trl_rewards.route_reward), recording(trl_rewards.rubric_reward)],
+            args=config,
+            train_dataset=dataset,
+            processing_class=tokenizer,
+            peft_config=lora,
+            callbacks=[timing],
+        )
     print(f"trainer tokenizer: padding_side={trainer.processing_class.padding_side!r}", flush=True)
     print(f"model dtype {next(trainer.model.parameters()).dtype}, device {next(trainer.model.parameters()).device}",
           flush=True)
@@ -520,7 +544,8 @@ def main():
     peak = torch.cuda.max_memory_allocated() / 2**30
 
     summary = {"wall_s": round(wall, 1), "peak_gpu_gib": round(peak, 2),
-               "config": {"model": args.model, "dtype": str(dtype), "prompt_version": PROMPT_VERSION,
+               "config": {"model": args.model, "init_adapter": args.init_adapter, "dtype": str(dtype),
+                          "prompt_version": PROMPT_VERSION,
                           "reasoning": REASONING, "tasks": args.tasks, "num_generations": args.gens,
                           "beta": args.beta, "seed": args.seed, "max_steps": args.steps},
                "generate": TIMING,
