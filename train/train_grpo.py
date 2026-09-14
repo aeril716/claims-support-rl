@@ -422,6 +422,8 @@ def main():
     parser.add_argument("--model", default=MODEL, help="policy model id (default Qwen2.5-7B-Instruct)")
     parser.add_argument("--bf16", action="store_true",
                         help="train in bfloat16 instead of float16 (A100/H100; the Quadro RTX 8000 has no bf16)")
+    parser.add_argument("--rubric", choices=["v1", "v2"], default="v1",
+                        help="rubric question wording the judge scores with (default v1, the wording runs 1-10 trained with)")
     parser.add_argument("--init-adapter", default=None,
                         help="start from this LoRA checkpoint directory (loaded with PeftModel, trainable) "
                              "instead of a fresh adapter; everything else is unchanged")
@@ -451,7 +453,8 @@ def main():
     LIVE_PATH = out / "live_steps.jsonl"
     PROMPT_VERSION = args.prompt_version
     REASONING = args.reasoning
-    print(f"prompt version: {PROMPT_VERSION}   reasoning field: {REASONING}", flush=True)
+    R.rubric_wording.set_version(args.rubric)
+    print(f"prompt version: {PROMPT_VERSION}   reasoning field: {REASONING}   rubric wording: {args.rubric}", flush=True)
     time_generation()
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
@@ -550,7 +553,7 @@ def main():
                           "beta": args.beta, "seed": args.seed, "max_steps": args.steps},
                "generate": TIMING,
                "judge": {**J.judge_info(), **{k: v for k, v in R.TIMING.items() if k != "judge_each_s"}},
-               "judge_failures": J.judge_failures(),
+               "judge_failures": J.judge_failures(), "rubric_wording": R.rubric_wording.active_version(),
                "judge_each_s": R.TIMING["judge_each_s"],
                "steps": timing.rows, "log_history": trainer.state.log_history,
                "repairs": R.REPAIRS}

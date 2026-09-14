@@ -119,5 +119,24 @@ class AnthropicJudgeTests(unittest.TestCase):
         self.assertEqual(judge.judge_failures(), 1)
 
 
+class RubricWordingTests(unittest.TestCase):
+    def test_generator_and_scorer_wording_agree(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "data"))
+        import generate_tasks
+        from reward import rubric_wording
+        for route, items in generate_tasks.PER_ROUTE_ITEMS.items():
+            for suffix, question, _expect in items:
+                iid = f"{route}.{suffix}"
+                if iid in rubric_wording.QUESTIONS:
+                    self.assertEqual(question, rubric_wording.QUESTIONS[iid], iid)
+
+    def test_reword_replaces_only_listed_ids(self):
+        from reward import rubric_wording
+        old = {"id": "refer_to_manufacturer.why", "check": "judge", "question": "Does the reply explain why?", "expect": "yes"}
+        self.assertEqual(rubric_wording.reword(old)["question"], rubric_wording.QUESTIONS["refer_to_manufacturer.why"])
+        other = {"id": "file_claim.covered", "check": "judge", "question": "Does the reply say the incident is covered?", "expect": "yes"}
+        self.assertIs(rubric_wording.reword(other), other)
+
+
 if __name__ == "__main__":
     unittest.main()

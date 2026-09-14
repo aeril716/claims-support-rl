@@ -218,25 +218,132 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
   Files `out/teacher_v8reason_train_r3.jsonl`, `data/sft/train_v8reason_r3.jsonl`. Script:
   `--task-ids` for stratified dry runs, `--teacher-suffix` repeatable (one line each).
 
-## Judge agreement, Haiku vs ollama (2026-09-14 13:40)
-- `eval/judge_agreement.py score` runs reward.score on a set of completions with the active
-  JUDGE_BACKEND and stores per-item verdicts; `compare` joins two such files and prints per-
-  item pass rates and agreement (both yes or both no), flagging items under 70%. Ollama ran
-  on the GPU server (the judge box is LAN-only); Haiku ran on the Mac. Tables in
-  `out/judge_agreement/` (verdict jsonl files and the two markdown tables, force-added).
-- 40 kept r3 teacher completions (seed-0 sample; 39 distinct tasks, 353 verdicts): rubric
-  mean Haiku 0.927 vs ollama 0.967, agreement 0.93. Below 70%: refer_to_manufacturer.why
-  (Haiku 0/4, ollama 4/4, agreement 0.00), explain_not_covered.grounded (4/6 vs 5/6, 0.50),
-  file_claim.how_to_start (4/6 vs 3/6, 0.50). Ollama is the more lenient judge on the
-  common items (no_reask 39/39 vs 35/39, on_topic 38/39 vs 33/39).
-- 40 base outputs, 14B v8 on the stratified test (366 verdicts): rubric mean Haiku 0.790 vs
-  ollama 0.810, agreement 0.90. Below 70%: ask_question.no_assertion (4/6 vs 6/6),
-  escalate.handed_to_person (4/6 vs 2/6), explain_not_covered.grounded (1/6 vs 1/6, 0.67),
-  explain_not_covered.not_covered (5/6 vs 3/6), peril.environment (1/2 vs 0/2),
-  peril.loss (1/1 vs 0/1). Route-content items with fixed wording (deductible, documentation,
-  how_to_start on base, tech_support items, missing.*) agree at or near 100%; the judgment
-  items (why, grounded, no_assertion, no_reask, on_topic) carry the disagreement, matching
-  the 2026-09-11 swap measurement.
+## Rubric wording v2 (2026-09-14)
+- Three judgment items were reworded after the agreement check (see the next section):
+  explain_not_covered.grounded ("Does the reply name the specific plan rule that excludes
+  this incident (for example, that loss and theft coverage applies to phones only)?"),
+  explain_not_covered.alternative ("Does the reply suggest at least one concrete thing the
+  customer can still do?"), refer_to_manufacturer.why ("Does the reply say that the
+  manufacturer's warranty is still active and that it covers this kind of failure (a defect,
+  malfunction, or wear), so the manufacturer handles it rather than the plan?"). Item ids
+  unchanged.
+- The task files were NOT regenerated; they still store the v1 questions. The wording is
+  versioned in `reward/rubric_wording.py` and applied by item id at scoring time, chosen by a
+  `--rubric v1|v2` flag: `train/train_grpo.py` defaults to v1 (so run11 trains under the same
+  wording as run10), `eval/before_after.py` and `eval/judge_agreement.py` default to v2.
+  Every summary.json and verdict file records `rubric_wording`. `data/generate_tasks.py`
+  carries the v2 strings for any future generation; `reward/test_judge.py` checks that the
+  generator and the scorer agree. CLAUDE.md's per-route table shows v2.
+- Runs 8, 9, and 10 were TRAINED with v1 wording. All eval tables from this commit on are v2
+  unless marked v1; every rubric number earlier in this file is v1.
+- v1 vs v2 on the three items, same completions, both judges (only these items re-scored;
+  `out/judge_agreement/wording_v1_vs_v2.md`; the run9 checkpoint set is on Drive only and was
+  not re-scored):
+  r3 teacher sample (seed 0): grounded Haiku 0.67 -> 0.67, ollama 0.83 -> 1.00, agreement
+  0.50 -> 0.67; alternative Haiku 0.17 -> 0.67, ollama 0.33 -> 0.67, agreement 0.83 -> 1.00;
+  why Haiku 0.00 -> 0.75, ollama 1.00 -> 1.00, agreement 0.00 -> 0.75.
+  14B v8 base, test 40: grounded 0.17 -> 0.17 both judges, agreement 0.67 -> 1.00;
+  alternative Haiku 0.17 -> 0.83, ollama 0.00 -> 0.83, agreement 0.83 -> 1.00; why Haiku
+  0.00 -> 0.33, ollama 0.00 -> 0.50, agreement 1.00 -> 0.83.
+  Agreement rose on five of six item-set pairs; the pass rates of alternative and why moved
+  up under v2 (the old questions were read as stricter than intended), grounded on the base
+  stayed at 1/6 under both, so that gap is the model, not the wording.
+
+## Judge agreement, Haiku vs ollama (2026-09-14 13:40, commit 24b83c5)
+`eval/judge_agreement.py score` runs reward.score on a set of completions with the active
+JUDGE_BACKEND and stores per-item verdicts; `compare` joins two such files and prints per-item
+pass rates and agreement (both yes or both no), flagging items under 70%. Ollama ran on the
+GPU server (the judge box is LAN-only), Haiku on the Mac. Verdict files and tables are in
+`out/judge_agreement/`.
+
+Reading, in three lines:
+- Items that check fixed content (deductible, documentation, the waiting-period facts,
+  missing.*, the tech_support items, exclusion.phones_only) agree at or near 100%.
+- The judgment items carry the disagreement: refer_to_manufacturer.why (Haiku 0/4 vs ollama
+  4/4 on the teacher set), explain_not_covered.grounded, ask_question.no_assertion,
+  common.no_reask, common.on_topic. Ollama is the more lenient judge on these.
+- Rubric means on the same completions differ by 0.02-0.04 between judges, in the same
+  direction on both sets, so run-to-run rubric deltas under about 0.04 are judge noise.
+
+### 40 kept r3 teacher completions (seed-0 sample; 39 distinct tasks)
+39 completions, 353 item verdicts | rubric mean haiku 0.927 vs ollama 0.967 | overall agreement 0.932
+
+| rubric item | n | haiku pass | ollama pass | agreement |
+|---|---|---|---|---|
+| ask_question.asks_missing | 12 | 12/12 | 12/12 | 1.00 |
+| ask_question.no_assertion | 12 | 11/12 | 12/12 | 0.92 |
+| common.no_reask | 39 | 35/39 | 39/39 | 0.90 |
+| common.on_topic | 39 | 33/39 | 38/39 | 0.87 |
+| common.question_cap | 39 | 39/39 | 39/39 | 1.00 |
+| common.word_count | 39 | 39/39 | 39/39 | 1.00 |
+| consistency.route_reply | 39 | 39/39 | 39/39 | 1.00 |
+| escalate.handed_to_person | 4 | 4/4 | 3/4 | 0.75 |
+| escalate.no_reason | 4 | 4/4 | 3/4 | 0.75 |
+| escalate.not_denied | 4 | 4/4 | 4/4 | 1.00 |
+| exclusion.phones_only | 6 | 6/6 | 6/6 | 1.00 |
+| explain_not_covered.alternative | 6 | 1/6 | 2/6 | 0.83 |
+| explain_not_covered.grounded | 6 | 4/6 | 5/6 | 0.50  **< 70%** |
+| explain_not_covered.not_covered | 6 | 6/6 | 6/6 | 1.00 |
+| explain_waiting_period.31_day_rule | 3 | 3/3 | 3/3 | 1.00 |
+| explain_waiting_period.coverage_begins | 3 | 3/3 | 3/3 | 1.00 |
+| explain_waiting_period.plan_active | 3 | 3/3 | 3/3 | 1.00 |
+| file_claim.covered | 6 | 6/6 | 6/6 | 1.00 |
+| file_claim.deductible | 6 | 5/6 | 5/6 | 1.00 |
+| file_claim.documentation | 6 | 6/6 | 6/6 | 1.00 |
+| file_claim.how_to_start | 6 | 4/6 | 3/6 | 0.50  **< 70%** |
+| missing.device | 2 | 2/2 | 2/2 | 1.00 |
+| missing.none | 27 | 27/27 | 27/27 | 1.00 |
+| missing.peril | 10 | 10/10 | 10/10 | 1.00 |
+| peril.battery | 2 | 2/2 | 2/2 | 1.00 |
+| peril.crack | 1 | 0/1 | 0/1 | 1.00 |
+| peril.drop | 1 | 1/1 | 1/1 | 1.00 |
+| peril.surge | 2 | 2/2 | 2/2 | 1.00 |
+| refer_to_manufacturer.to_manufacturer | 4 | 4/4 | 4/4 | 1.00 |
+| refer_to_manufacturer.why | 4 | 0/4 | 4/4 | 0.00  **< 70%** |
+| tech_support.concrete_step | 4 | 4/4 | 4/4 | 1.00 |
+| tech_support.no_charge | 4 | 3/4 | 4/4 | 0.75 |
+| tech_support.software_not_claim | 4 | 4/4 | 4/4 | 1.00 |
+| **all** | 353 | 326/353 | 340/353 | 0.93 |
+
+### 40 base outputs, 14B v8 on the stratified test
+40 completions, 366 item verdicts | rubric mean haiku 0.790 vs ollama 0.810 | overall agreement 0.902
+
+| rubric item | n | haiku pass | ollama pass | agreement |
+|---|---|---|---|---|
+| ask_question.asks_missing | 6 | 6/6 | 6/6 | 1.00 |
+| ask_question.no_assertion | 6 | 4/6 | 6/6 | 0.67  **< 70%** |
+| common.no_reask | 34 | 24/34 | 34/34 | 0.71 |
+| common.on_topic | 40 | 27/40 | 29/40 | 0.80 |
+| common.question_cap | 40 | 40/40 | 40/40 | 1.00 |
+| common.word_count | 40 | 33/40 | 33/40 | 1.00 |
+| consistency.route_reply | 40 | 37/40 | 37/40 | 0.95 |
+| escalate.handed_to_person | 6 | 4/6 | 2/6 | 0.67  **< 70%** |
+| escalate.no_reason | 6 | 6/6 | 5/6 | 0.83 |
+| escalate.not_denied | 6 | 6/6 | 6/6 | 1.00 |
+| exclusion.phones_only | 6 | 1/6 | 1/6 | 1.00 |
+| explain_not_covered.alternative | 6 | 1/6 | 0/6 | 0.83 |
+| explain_not_covered.grounded | 6 | 1/6 | 1/6 | 0.67  **< 70%** |
+| explain_not_covered.not_covered | 6 | 5/6 | 3/6 | 0.67  **< 70%** |
+| explain_waiting_period.31_day_rule | 5 | 3/5 | 3/5 | 1.00 |
+| explain_waiting_period.coverage_begins | 5 | 3/5 | 3/5 | 1.00 |
+| explain_waiting_period.plan_active | 5 | 3/5 | 4/5 | 0.80 |
+| file_claim.covered | 6 | 6/6 | 6/6 | 1.00 |
+| file_claim.deductible | 6 | 0/6 | 0/6 | 1.00 |
+| file_claim.documentation | 6 | 6/6 | 6/6 | 1.00 |
+| file_claim.how_to_start | 6 | 6/6 | 6/6 | 1.00 |
+| missing.device | 6 | 6/6 | 6/6 | 1.00 |
+| missing.none | 34 | 32/34 | 34/34 | 0.94 |
+| missing.peril | 6 | 4/6 | 3/6 | 0.83 |
+| peril.environment | 2 | 1/2 | 0/2 | 0.50  **< 70%** |
+| peril.loss | 1 | 1/1 | 0/1 | 0.00  **< 70%** |
+| peril.theft | 2 | 1/2 | 1/2 | 1.00 |
+| peril.wear | 1 | 0/1 | 0/1 | 1.00 |
+| refer_to_manufacturer.to_manufacturer | 6 | 4/6 | 4/6 | 1.00 |
+| refer_to_manufacturer.why | 6 | 0/6 | 0/6 | 1.00 |
+| tech_support.concrete_step | 5 | 5/5 | 5/5 | 1.00 |
+| tech_support.no_charge | 5 | 5/5 | 5/5 | 1.00 |
+| tech_support.software_not_claim | 5 | 5/5 | 5/5 | 1.00 |
+| **all** | 366 | 286/366 | 294/366 | 0.90 |
 
 ## Colab runs 8 and 9 (14B, A100 80GB, judge claude-haiku-4-5)
 Both trained on the relabeled sub35 with the run4 settings (8 generations, batch 2x4, beta 0,

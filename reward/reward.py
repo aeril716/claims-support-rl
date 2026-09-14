@@ -22,6 +22,7 @@ import threading
 import time
 
 from reward import rubric_checks
+from reward import rubric_wording
 from reward.judge import ask_with_reasoning
 
 ROUTE_WEIGHT = 0.5
@@ -230,6 +231,7 @@ def score(task, text):
 
     items = []
     for item in task["rubric"] + [consistency_item(route)]:
+        item = rubric_wording.reword(item)   # current question wording by id (see rubric_wording.py)
         reasoning = None                # code items and the unknown-route shortcut have none
         if item["check"] == "code":
             answer = rubric_checks.answer(item, reply)

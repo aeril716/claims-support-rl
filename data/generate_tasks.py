@@ -131,12 +131,12 @@ PER_ROUTE_ITEMS = {
     ],
     "explain_not_covered": [
         ("not_covered", "Does the reply say it is not covered?", "yes"),
-        ("grounded", "Does the reply ground that in the policy?", "yes"),
-        ("alternative", "Does the reply offer an alternative, if one exists?", "yes"),
+        ("grounded", "Does the reply name the specific plan rule that excludes this incident (for example, that loss and theft coverage applies to phones only)?", "yes"),
+        ("alternative", "Does the reply suggest at least one concrete thing the customer can still do?", "yes"),
     ],
     "refer_to_manufacturer": [
         ("to_manufacturer", "Does the reply direct the customer to the manufacturer warranty?", "yes"),
-        ("why", "Does the reply explain why?", "yes"),
+        ("why", "Does the reply say that the manufacturer's warranty is still active and that it covers this kind of failure (a defect, malfunction, or wear), so the manufacturer handles it rather than the plan?", "yes"),
     ],
     "tech_support": [
         ("software_not_claim", "Does the reply identify the problem as a software problem and not a claim?", "yes"),

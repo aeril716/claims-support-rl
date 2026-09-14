@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT / "data"))
 
 from reward.reward import parse_record, score   # noqa: E402
 from reward.judge import judge_info             # noqa: E402
+from reward import rubric_wording               # noqa: E402
 import train_grpo                                # noqa: E402  (prompt builder and task loader)
 
 MAX_NEW_TOKENS = 512
@@ -112,9 +113,12 @@ def main():
     parser.add_argument("--reasoning", action="store_true",
                         help="ask for a leading reasoning field, as train/train_grpo.py --reasoning")
     parser.add_argument("--bf16", action="store_true", help="load the model in bfloat16 (A100/H100)")
+    parser.add_argument("--rubric", choices=sorted(rubric_wording.VERSIONS), default="v2",
+                        help="rubric question wording version applied at scoring time (default v2)")
     args = parser.parse_args()
     train_grpo.PROMPT_VERSION = args.prompt_version
     train_grpo.REASONING = args.reasoning
+    rubric_wording.set_version(args.rubric)
     args.out.mkdir(parents=True, exist_ok=True)
     rows = train_grpo.load_tasks()
     n = len(rows)
@@ -144,7 +148,7 @@ def main():
 
     records, raw_ok, repaired_ok, per_route, chosen_hist = parse_records(rows, outputs)
     summary = {"model": args.model, "how": how, "tasks": n, "prompt_version": args.prompt_version,
-               "reasoning": args.reasoning, "judge": None,
+               "reasoning": args.reasoning, "judge": None, "rubric_wording": rubric_wording.active_version(),
                "parsed_raw": raw_ok, "parsed_after_repair": repaired_ok,
                "route_accuracy": sum(r["correct"] for r in records) / n,
                "per_route": {k: {"correct": v[0], "total": v[1]} for k, v in sorted(per_route.items())},

@@ -390,7 +390,9 @@ penalty for now; the repair rate is watched across runs instead.
 
 ### Per-route items
 
-Every item below is a `judge` item.
+Every item below is a `judge` item. Wording is versioned in `reward/rubric_wording.py`, which
+the scorer applies by item id at scoring time, so the stored task files keep whatever wording
+they were generated with; this table shows the current version (v2, 2026-09-14).
 
 | route | question | expect |
 |---|---|---|
@@ -407,10 +409,10 @@ Every item below is a `judge` item.
 | explain_waiting_period | Does the reply say the plan itself is active? | yes |
 | explain_waiting_period | Does the reply say when coverage begins? | yes |
 | explain_not_covered | Does the reply say it is not covered? | yes |
-| explain_not_covered | Does the reply ground that in the policy? | yes |
-| explain_not_covered | Does the reply offer an alternative, if one exists? | yes |
+| explain_not_covered | Does the reply name the specific plan rule that excludes this incident (for example, that loss and theft coverage applies to phones only)? | yes |
+| explain_not_covered | Does the reply suggest at least one concrete thing the customer can still do? | yes |
 | refer_to_manufacturer | Does the reply direct the customer to the manufacturer warranty? | yes |
-| refer_to_manufacturer | Does the reply explain why? | yes |
+| refer_to_manufacturer | Does the reply say that the manufacturer's warranty is still active and that it covers this kind of failure (a defect, malfunction, or wear), so the manufacturer handles it rather than the plan? | yes |
 | tech_support | Does the reply identify the problem as a software problem and not a claim? | yes |
 | tech_support | Does the reply say tech support handles it at no charge? | yes |
 | tech_support | Does the reply give a concrete step the customer can try? | yes |
