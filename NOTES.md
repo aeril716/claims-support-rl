@@ -223,6 +223,13 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
   scores completions in a thread pool only on the anthropic backend. Every summary.json now
   records the judge backend and model (`judge.backend`, `judge.model`); the trainer also
   records model, dtype, prompt version and the run settings under `config`.
+- Anthropic backend hardening (after the first Colab eval failed at scoring): the reply is
+  fence-stripped and the first balanced JSON object that has a yes/no verdict is taken
+  (`_first_object`), and the prompt gets "Reply with only the JSON object, no code fences"
+  appended on that backend only. `eval/before_after.py` now writes outputs.json and an
+  unscored summary.json right after generation, scores as a second phase, and has
+  `--rescore --out <dir>` to judge a saved outputs.json without regenerating; per-item
+  verdicts with reasoning are stored per record under `items`.
 - Runs 8-9 (Colab) use claude-haiku-4-5 as judge, so their rubric scores are not comparable
   with runs 3-7 (qwen3:30b-a3b); route accuracy is comparable.
 - New trainer flags: `--model` (default Qwen2.5-7B-Instruct), `--bf16` (fp16 otherwise; the

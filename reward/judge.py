@@ -20,6 +20,7 @@ Standard library only: urllib.request, no client package.
 
 import json
 import os
+import re
 import threading
 import urllib.request
 
@@ -74,7 +75,7 @@ def _call_anthropic(prompt, accept):
         response = client.messages.create(
             model=ANTHROPIC_MODEL,
             max_tokens=ANTHROPIC_MAX_TOKENS,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{"role": "user", "content": prompt + ANTHROPIC_SUFFIX}],
         )
     text = "".join(block.text for block in response.content if block.type == "text").strip()
     LAST.clear()
@@ -82,15 +83,54 @@ def _call_anthropic(prompt, accept):
                  "input_tokens": response.usage.input_tokens,
                  "output_tokens": response.usage.output_tokens,
                  "stop_reason": response.stop_reason})
-    start, end = text.find("{"), text.rfind("}")
-    if start != -1 and end > start:
-        try:
-            obj = json.loads(text[start:end + 1])
-        except json.JSONDecodeError:
-            obj = None
-        if obj is not None and accept(obj):
-            return obj
+    obj = _first_object(text, accept)
+    if obj is not None:
+        return obj
     raise ValueError(f"judge reply carried no schema-shaped JSON: {text[:200]!r}")
+
+
+ANTHROPIC_SUFFIX = "\n\nReply with only the JSON object, no code fences."
+
+
+def _strip_fences(text):
+    """Remove markdown code fences (``` or ```json) wrapping the reply, if any."""
+    lines = [l for l in text.strip().splitlines() if not l.strip().startswith("```")]
+    return "\n".join(lines).strip()
+
+
+def _first_object(text, accept):
+    """The first JSON object in `text` that `accept` approves of. Tries the fence-stripped text
+    as a whole, then every balanced {...} candidate from each opening brace, so prose or fences
+    around the object, or a second object after it, do not fail the verdict."""
+    text = _strip_fences(text)
+    decoder = json.JSONDecoder()
+    candidates = [text] if text.startswith("{") else []
+    for match in re.finditer(r"\{", text):
+        try:
+            obj, _end = decoder.raw_decode(text, match.start())
+        except json.JSONDecodeError:
+            continue
+        candidates.append(obj)
+    for cand in candidates:
+        if isinstance(cand, str):
+            try:
+                cand = json.loads(cand)
+            except json.JSONDecodeError:
+                continue
+        cand = _normalise_verdicts(cand)
+        if accept(cand):
+            return cand
+    return None
+
+
+def _normalise_verdicts(obj):
+    """Lower-case and strip any "verdict" string, in an object or a list of objects, so "No"
+    or " yes" satisfy the yes/no check the schema enforces on the ollama path."""
+    items = obj if isinstance(obj, list) else [obj]
+    for item in items:
+        if isinstance(item, dict) and isinstance(item.get("verdict"), str):
+            item["verdict"] = item["verdict"].strip().lower()
+    return obj
 
 SCHEMA = {
     "type": "object",

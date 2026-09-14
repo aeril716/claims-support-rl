@@ -3,6 +3,7 @@
     python eval/before_after.py --model Qwen/Qwen2.5-1.5B-Instruct --out <dir>
     python eval/before_after.py --model ollama:qwen2.5:32b-instruct --out <dir>
     python eval/before_after.py --model Qwen/Qwen2.5-7B-Instruct --adapter out/grpo_run3_full/checkpoint-320 --score --out <dir>
+    python eval/before_after.py --rescore --out <dir>        # judge a saved outputs.json again, no generation
 
 --adapter loads a LoRA checkpoint on top of the base model (the "after"). --score also runs
 every output through reward.score, so the rubric pass rate can sit next to route accuracy;
@@ -71,35 +72,11 @@ def generate_ollama(model_name, rows):
     return outputs, "ollama quantised greedy (temperature 0)"
 
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model", required=True)
-    parser.add_argument("--out", type=Path, required=True)
-    parser.add_argument("--adapter", default=None, help="LoRA checkpoint directory to load on the base")
-    parser.add_argument("--score", action="store_true", help="also grade every output with reward.score")
-    parser.add_argument("--prompt-version", choices=["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v7run7", "v8"], default="v1",
-                        help="policy prompt version, as in train/train_grpo.py (v1 = run1-run6)")
-    parser.add_argument("--reasoning", action="store_true",
-                        help="ask for a leading reasoning field, as train/train_grpo.py --reasoning")
-    parser.add_argument("--bf16", action="store_true", help="load the model in bfloat16 (A100/H100)")
-    args = parser.parse_args()
-    train_grpo.PROMPT_VERSION = args.prompt_version
-    train_grpo.REASONING = args.reasoning
-    args.out.mkdir(parents=True, exist_ok=True)
-
-    rows = train_grpo.load_tasks()
-    start = time.time()
-    if args.model.startswith("ollama:"):
-        outputs, how = generate_ollama(args.model[len("ollama:"):], rows)
-    else:
-        outputs, how = generate_hf(args.model, rows, args.adapter, args.bf16)
-    elapsed = time.time() - start
-
-    tasks = {t["task_id"]: t for t in (json.loads(l) for l in open(train_grpo.TASKS) if l.strip())}
+def parse_records(rows, outputs):
+    """Route parsing and per-route counts for generated outputs; no judge involved."""
     records, raw_ok, repaired_ok = [], 0, 0
     per_route = collections.defaultdict(lambda: [0, 0])
     chosen_hist = collections.Counter()
-    item_pass = collections.defaultdict(lambda: [0, 0])
     for row, text in zip(rows, outputs):
         record_parsed = parse_record(text)
         route, reply, reasoning, repairs = (record_parsed["route"], record_parsed["reply"],
@@ -111,32 +88,70 @@ def main():
         per_route[row["route_answer"]][1] += 1
         per_route[row["route_answer"]][0] += correct
         chosen_hist[str(route)] += 1
-        record = {"task_id": row["task_id"], "gold": row["route_answer"], "chosen": route,
-                  "correct": bool(correct), "repairs": repairs, "reasoning": reasoning,
-                  "facts": record_parsed["facts"], "raw_output": text}
-        if args.score:
-            reward, detail = score(tasks[row["task_id"]], text)
-            record["reward"], record["rubric_score"] = reward, detail.get("rubric_score")
-            for item in detail["items"]:
-                item_pass[item["id"]][1] += 1
-                item_pass[item["id"]][0] += item["passed"]
-        records.append(record)
+        records.append({"task_id": row["task_id"], "gold": row["route_answer"], "chosen": route,
+                        "correct": bool(correct), "repairs": repairs, "reasoning": reasoning,
+                        "facts": record_parsed["facts"], "raw_output": text})
+    return records, raw_ok, repaired_ok, per_route, chosen_hist
 
+
+def write(out, summary, records):
+    (out / "summary.json").write_text(json.dumps(summary, indent=1))
+    (out / "outputs.json").write_text(json.dumps(records, indent=1, ensure_ascii=False))
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model", default=None, help="policy model id (required unless --rescore)")
+    parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--adapter", default=None, help="LoRA checkpoint directory to load on the base")
+    parser.add_argument("--score", action="store_true", help="also grade every output with reward.score")
+    parser.add_argument("--rescore", action="store_true",
+                        help="skip generation: load <out>/outputs.json and run the judge on it")
+    parser.add_argument("--prompt-version", choices=["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v7run7", "v8"], default="v1",
+                        help="policy prompt version, as in train/train_grpo.py (v1 = run1-run6)")
+    parser.add_argument("--reasoning", action="store_true",
+                        help="ask for a leading reasoning field, as train/train_grpo.py --reasoning")
+    parser.add_argument("--bf16", action="store_true", help="load the model in bfloat16 (A100/H100)")
+    args = parser.parse_args()
+    train_grpo.PROMPT_VERSION = args.prompt_version
+    train_grpo.REASONING = args.reasoning
+    args.out.mkdir(parents=True, exist_ok=True)
+    rows = train_grpo.load_tasks()
     n = len(rows)
+
+    if args.rescore:
+        # Scoring only. The outputs and the generation summary are read back from <out>; the
+        # prompt version and model are taken from the saved summary, not the flags.
+        saved = json.loads((args.out / "outputs.json").read_text())
+        old_summary = json.loads((args.out / "summary.json").read_text())
+        by_id = {r["task_id"]: r for r in saved}
+        assert set(by_id) == {r["task_id"] for r in rows}, "saved outputs do not match the current test file"
+        outputs = [by_id[row["task_id"]]["raw_output"] for row in rows]
+        how, elapsed = old_summary["how"], old_summary["seconds"]
+        args.model, args.prompt_version = old_summary["model"], old_summary["prompt_version"]
+        args.reasoning = old_summary.get("reasoning", False)
+        args.score = True
+        print(f"rescoring {len(outputs)} saved outputs from {args.out} with judge {judge_info()}")
+    else:
+        if not args.model:
+            parser.error("--model is required unless --rescore")
+        start = time.time()
+        if args.model.startswith("ollama:"):
+            outputs, how = generate_ollama(args.model[len("ollama:"):], rows)
+        else:
+            outputs, how = generate_hf(args.model, rows, args.adapter, args.bf16)
+        elapsed = time.time() - start
+
+    records, raw_ok, repaired_ok, per_route, chosen_hist = parse_records(rows, outputs)
     summary = {"model": args.model, "how": how, "tasks": n, "prompt_version": args.prompt_version,
-               "reasoning": args.reasoning, "judge": judge_info() if args.score else None,
+               "reasoning": args.reasoning, "judge": None,
                "parsed_raw": raw_ok, "parsed_after_repair": repaired_ok,
                "route_accuracy": sum(r["correct"] for r in records) / n,
                "per_route": {k: {"correct": v[0], "total": v[1]} for k, v in sorted(per_route.items())},
                "chosen_histogram": dict(chosen_hist),
                "seconds": round(elapsed)}
-    if args.score:
-        scored = [r["rubric_score"] for r in records if r.get("rubric_score") is not None]
-        summary["rubric_pass_rate_mean"] = sum(scored) / len(scored) if scored else None
-        summary["rubric_scored_outputs"] = len(scored)
-        summary["item_pass"] = {k: {"passed": v[0], "total": v[1]} for k, v in sorted(item_pass.items())}
-    (args.out / "summary.json").write_text(json.dumps(summary, indent=1))
-    (args.out / "outputs.json").write_text(json.dumps(records, indent=1, ensure_ascii=False))
+    # Saved before any judge call, so a scoring failure never costs the generation.
+    write(args.out, summary, records)
 
     print(f"\n{args.model}  ({how})  {elapsed/60:.1f} min")
     print(f"  parsed raw {raw_ok}/{n}   after repair {repaired_ok}/{n}")
@@ -144,9 +159,30 @@ def main():
     for route, (c, t) in sorted(per_route.items()):
         print(f"    {route:<24}{c:>3}/{t}")
     print(f"  chosen routes: {dict(chosen_hist)}")
+
     if args.score:
+        tasks = {t["task_id"]: t for t in (json.loads(l) for l in open(train_grpo.TASKS) if l.strip())}
+        item_pass = collections.defaultdict(lambda: [0, 0])
+        t0 = time.time()
+        for i, record in enumerate(records, start=1):
+            reward, detail = score(tasks[record["task_id"]], record["raw_output"])
+            record["reward"], record["rubric_score"] = reward, detail.get("rubric_score")
+            record["items"] = [{"id": it["id"], "answer": it["answer"], "passed": it["passed"],
+                                "reasoning": it.get("reasoning")} for it in detail["items"]]
+            for item in detail["items"]:
+                item_pass[item["id"]][1] += 1
+                item_pass[item["id"]][0] += item["passed"]
+            if i % 10 == 0 or i == n:
+                print(f"  scored {i}/{n}", flush=True)
+        scored = [r["rubric_score"] for r in records if r.get("rubric_score") is not None]
+        summary["judge"] = judge_info()
+        summary["rubric_pass_rate_mean"] = sum(scored) / len(scored) if scored else None
+        summary["rubric_scored_outputs"] = len(scored)
+        summary["item_pass"] = {k: {"passed": v[0], "total": v[1]} for k, v in sorted(item_pass.items())}
+        summary["scoring_seconds"] = round(time.time() - t0)
+        write(args.out, summary, records)
         print(f"  rubric pass rate (mean over {summary['rubric_scored_outputs']} parsed outputs): "
-              f"{summary['rubric_pass_rate_mean']:.3f}")
+              f"{summary['rubric_pass_rate_mean']:.3f}   judge {summary['judge']}   {summary['scoring_seconds']} s")
 
 
 if __name__ == "__main__":
