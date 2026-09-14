@@ -236,6 +236,14 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
   generator and the scorer agree. CLAUDE.md's per-route table shows v2.
 - Runs 8, 9, and 10 were TRAINED with v1 wording. All eval tables from this commit on are v2
   unless marked v1; every rubric number earlier in this file is v1.
+- From here on every eval scores the same completions under both wordings:
+  `eval/before_after.py --rubric both` is the default. It scores under v2 once and re-judges
+  only the three reworded items under v1 (about 15% more judge calls, not double), then
+  rebuilds the v1 rubric score over the same item set. summary.json carries
+  `rubric_v1_pass_rate_mean`, `rubric_v2_pass_rate_mean`, `item_pass_v1`, `item_pass_v2`;
+  the old names `rubric_pass_rate_mean` / `item_pass` keep the v2 values; each output record
+  has `rubric_score_v1` and `rubric_score_v2`, and the reworded items carry `answer_v1`.
+  Route accuracy is unaffected. Report both rubric columns in every table.
 - v1 vs v2 on the three items, same completions, both judges (only these items re-scored;
   `out/judge_agreement/wording_v1_vs_v2.md`; the run9 checkpoint set is on Drive only and was
   not re-scored):

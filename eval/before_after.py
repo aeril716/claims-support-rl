@@ -5,6 +5,10 @@
     python eval/before_after.py --model Qwen/Qwen2.5-7B-Instruct --adapter out/grpo_run3_full/checkpoint-320 --score --out <dir>
     python eval/before_after.py --rescore --out <dir>        # judge a saved outputs.json again, no generation
 
+--rubric both (the default) scores under wording v2 and re-judges only the reworded items
+under v1, so summary.json carries rubric_v1_pass_rate_mean and rubric_v2_pass_rate_mean plus
+item_pass_v1 / item_pass_v2; rubric_pass_rate_mean and item_pass keep the primary (v2) values.
+
 --adapter loads a LoRA checkpoint on top of the base model (the "after"). --score also runs
 every output through reward.score, so the rubric pass rate can sit next to route accuracy;
 that needs the judge and is off by default.
@@ -113,12 +117,14 @@ def main():
     parser.add_argument("--reasoning", action="store_true",
                         help="ask for a leading reasoning field, as train/train_grpo.py --reasoning")
     parser.add_argument("--bf16", action="store_true", help="load the model in bfloat16 (A100/H100)")
-    parser.add_argument("--rubric", choices=sorted(rubric_wording.VERSIONS), default="v2",
-                        help="rubric question wording version applied at scoring time (default v2)")
+    parser.add_argument("--rubric", choices=sorted(rubric_wording.VERSIONS) + ["both"], default="both",
+                        help="rubric wording to score with: v1, v2, or both (default; scores under v2 and re-judges "
+                             "only the reworded items under v1, reporting a rubric column per version)")
     args = parser.parse_args()
     train_grpo.PROMPT_VERSION = args.prompt_version
     train_grpo.REASONING = args.reasoning
-    rubric_wording.set_version(args.rubric)
+    versions = ["v2", "v1"] if args.rubric == "both" else [args.rubric]
+    rubric_wording.set_version(versions[0])
     args.out.mkdir(parents=True, exist_ok=True)
     rows = train_grpo.load_tasks()
     n = len(rows)
@@ -148,7 +154,7 @@ def main():
 
     records, raw_ok, repaired_ok, per_route, chosen_hist = parse_records(rows, outputs)
     summary = {"model": args.model, "how": how, "tasks": n, "prompt_version": args.prompt_version,
-               "reasoning": args.reasoning, "judge": None, "rubric_wording": rubric_wording.active_version(),
+               "reasoning": args.reasoning, "judge": None, "rubric_wording": args.rubric,
                "parsed_raw": raw_ok, "parsed_after_repair": repaired_ok,
                "route_accuracy": sum(r["correct"] for r in records) / n,
                "per_route": {k: {"correct": v[0], "total": v[1]} for k, v in sorted(per_route.items())},
@@ -166,29 +172,62 @@ def main():
 
     if args.score:
         tasks = {t["task_id"]: t for t in (json.loads(l) for l in open(train_grpo.TASKS) if l.strip())}
-        item_pass = collections.defaultdict(lambda: [0, 0])
+        primary = versions[0]
+        item_pass = {v: collections.defaultdict(lambda: [0, 0]) for v in versions}
         t0 = time.time()
         for i, record in enumerate(records, start=1):
-            reward, detail = score(tasks[record["task_id"]], record["raw_output"])
-            record["reward"], record["rubric_score"] = reward, detail.get("rubric_score")
-            record["items"] = [{"id": it["id"], "answer": it["answer"], "passed": it["passed"],
-                                "reasoning": it.get("reasoning")} for it in detail["items"]]
-            for item in detail["items"]:
-                item_pass[item["id"]][1] += 1
-                item_pass[item["id"]][0] += item["passed"]
+            task = tasks[record["task_id"]]
+            rubric_wording.set_version(primary)
+            reward, detail = score(task, record["raw_output"])
+            record["reward"], record[f"rubric_score_{primary}"] = reward, detail.get("rubric_score")
+            items = [{"id": it["id"], "answer": it["answer"], "passed": it["passed"],
+                      "reasoning": it.get("reasoning")} for it in detail["items"]]
+            record["items"] = items
+            for it in items:
+                item_pass[primary][it["id"]][1] += 1
+                item_pass[primary][it["id"]][0] += it["passed"]
+            if len(versions) > 1 and detail["parsed"]:
+                # The other version differs only on the reworded items: re-judge just those
+                # and rebuild that version's rubric score over the same item set.
+                other = versions[1]
+                changed = set(rubric_wording.VERSIONS[primary]) | set(rubric_wording.VERSIONS[other])
+                sub = {**task, "rubric": [it for it in task["rubric"] if it["id"] in changed]}
+                rubric_wording.set_version(other)
+                other_items = {}
+                if sub["rubric"]:
+                    _r, d2 = score(sub, record["raw_output"])
+                    other_items = {it["id"]: it for it in d2["items"] if it["id"] in changed}
+                rubric_wording.set_version(primary)
+                passed = 0
+                for it in items:
+                    o = other_items.get(it["id"])
+                    ok = o["passed"] if o else it["passed"]
+                    passed += ok
+                    item_pass[other][it["id"]][1] += 1
+                    item_pass[other][it["id"]][0] += ok
+                    if o:
+                        it[f"answer_{other}"], it[f"passed_{other}"] = o["answer"], o["passed"]
+                record[f"rubric_score_{other}"] = passed / len(items) if items else None
             if i % 10 == 0 or i == n:
                 print(f"  scored {i}/{n}", flush=True)
-        scored = [r["rubric_score"] for r in records if r.get("rubric_score") is not None]
         summary["judge"] = judge_info()
         summary["judge_failures"] = summary["judge"]["judge_failures"]
-        summary["rubric_pass_rate_mean"] = sum(scored) / len(scored) if scored else None
-        summary["rubric_scored_outputs"] = len(scored)
-        summary["item_pass"] = {k: {"passed": v[0], "total": v[1]} for k, v in sorted(item_pass.items())}
         summary["scoring_seconds"] = round(time.time() - t0)
+        for v in versions:
+            scored = [r[f"rubric_score_{v}"] for r in records if r.get(f"rubric_score_{v}") is not None]
+            summary[f"rubric_{v}_pass_rate_mean"] = sum(scored) / len(scored) if scored else None
+            summary[f"item_pass_{v}"] = {k: {"passed": x[0], "total": x[1]} for k, x in sorted(item_pass[v].items())}
+        # backwards-compatible names carry the primary version
+        summary["rubric_pass_rate_mean"] = summary[f"rubric_{primary}_pass_rate_mean"]
+        summary["rubric_scored_outputs"] = sum(1 for r in records if r.get(f"rubric_score_{primary}") is not None)
+        summary["item_pass"] = summary[f"item_pass_{primary}"]
+        for r in records:
+            r["rubric_score"] = r.get(f"rubric_score_{primary}")
         write(args.out, summary, records)
-        print(f"  rubric pass rate (mean over {summary['rubric_scored_outputs']} parsed outputs): "
-              f"{summary['rubric_pass_rate_mean']:.3f}   judge {summary['judge']}   {summary['scoring_seconds']} s"
-              f"   judge_failures {summary['judge_failures']}")
+        cols = "   ".join(f"rubric {v} {summary[f'rubric_{v}_pass_rate_mean']:.3f}" for v in versions
+                          if summary[f"rubric_{v}_pass_rate_mean"] is not None)
+        print(f"  {cols} (mean over {summary['rubric_scored_outputs']} parsed outputs)   judge {summary['judge']}"
+              f"   {summary['scoring_seconds']} s   judge_failures {summary['judge_failures']}")
 
 
 if __name__ == "__main__":
