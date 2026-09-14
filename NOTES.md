@@ -194,6 +194,29 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
   Replies: mean 45 words, 7/432 over 60 (r1: 75 words, 361/557 over 60). Parse 920/921.
   Haiku rubric on 40 random kept: 0.900 (r1 0.852, base 0.793); word_count 39/40 now; still
   weak: explain_not_covered.grounded 0/5 and .alternative 0/5, ask_question.no_assertion 5/11.
+- r3 (same teacher and settings, fact filter on, $3.11, 23.7 min) with three teacher-only
+  suffix lines, verbatim:
+    1. Keep the reply to 60 words or fewer.
+    2. claim_limit_reached is "yes" when claims_last_12m equals or exceeds the claim limit
+       for the device type in the knowledge base; when the account is shown, answer "yes"
+       or "no", never "unknown".
+    3. For explain_not_covered, the reply must name the knowledge-base rule that excludes
+       the incident and offer an alternative if one exists.
+  A 20-task stratified dry run (4 refer-at-limit, 4 not_covered, 3 escalate, 3 ask with
+  device stated, 2 tech, 2 file_claim, 2 waiting; $0.25) went 19/20 first-sample with 1 fact
+  failure before the full run. Full run: first-sample 274/307 (ask 103/128, file 43/45,
+  not_covered 36/36, escalate 28/28, refer 24/30, waiting 13/13, tech 27/27); kept 513 over
+  262 tasks (r1 557/281, r2 432/222). Route right but facts wrong 66/811 (r2 182/804), all
+  on claim_limit_reached: 19 ask samples writing "no" on an empty account (rule value
+  "unknown"), the rest "no"/"unknown" at exactly the limit on not_covered, tech, ask.
+  Refer-at-limit tasks with a kept sample 6/11 (r1 8, r2 1); the other five (t098 t101 t109
+  t124 t125) escalate in all three samples, so the limit line fixed the fact field but made
+  the limit win over the warranty rule on those. Replies mean 44 words, 3/513 over 60. Haiku
+  rubric on 40 random kept: 0.937 (r1 0.852, r2 0.900, base 0.793); word_count 40/40,
+  escalate.no_reason 4/4, explain_not_covered.grounded 4/6, .alternative 2/6,
+  ask_question.no_assertion 10/13, refer_to_manufacturer.why 2/4.
+  Files `out/teacher_v8reason_train_r3.jsonl`, `data/sft/train_v8reason_r3.jsonl`. Script:
+  `--task-ids` for stratified dry runs, `--teacher-suffix` repeatable (one line each).
 
 ## Colab runs 8 and 9 (14B, A100 80GB, judge claude-haiku-4-5)
 Both trained on the relabeled sub35 with the run4 settings (8 generations, batch 2x4, beta 0,

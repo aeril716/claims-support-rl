@@ -117,15 +117,17 @@ def main():
     parser.add_argument("--max-tokens", type=int, default=800)
     parser.add_argument("--tasks", default="data/v3_kb_definitions/tasks_train.jsonl")
     parser.add_argument("--limit", type=int, default=None, help="first N tasks only (dry run)")
+    parser.add_argument("--task-ids", default=None,
+                        help="comma-separated task ids to run instead of the whole file (stratified dry runs)")
     parser.add_argument("--out-samples", type=Path, default=Path("out/teacher_v8reason_train.jsonl"))
     parser.add_argument("--out-sft", type=Path, default=Path("data/sft/train_v8reason.jsonl"))
     parser.add_argument("--max-kept", type=int, default=2)
     parser.add_argument("--cap-usd", type=float, default=10.0)
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--prompt-version", default="v8")
-    parser.add_argument("--teacher-suffix", default="",
-                        help="text appended to the TEACHER's system prompt only; the student prompt written "
-                             "to --out-sft stays exactly what train_grpo.py renders")
+    parser.add_argument("--teacher-suffix", default=None, action="append",
+                        help="line appended to the TEACHER's system prompt only (repeatable; one line each); "
+                             "the student prompt written to --out-sft stays exactly what train_grpo.py renders")
     parser.add_argument("--fact-check", action="store_true",
                         help="keep a sample only if its fact fields also match the account (fact_truth)")
     args = parser.parse_args()
@@ -135,13 +137,21 @@ def main():
     train_grpo.PROMPT_VERSION = args.prompt_version
     train_grpo.REASONING = True
     rows = train_grpo.load_tasks(args.tasks)
+    if args.task_ids:
+        wanted = [t.strip() for t in args.task_ids.split(",") if t.strip()]
+        by_id = {r["task_id"]: r for r in rows}
+        missing = [t for t in wanted if t not in by_id]
+        assert not missing, f"task ids not in {args.tasks}: {missing}"
+        rows = [by_id[t] for t in wanted]
     if args.limit:
         rows = rows[:args.limit]
     tasks = {t["task_id"]: t for t in (json.loads(l) for l in open(args.tasks) if l.strip())}
     system_text = rows[0]["prompt"][0]["content"]
     assert all(r["prompt"][0]["content"] == system_text for r in rows), "system prompt must be constant"
     assert '"reasoning": <one or two sentences' in system_text, "reasoning field is not in the prompt"
-    teacher_system = system_text + ("\n\n" + args.teacher_suffix.strip() if args.teacher_suffix.strip() else "")
+    suffix_lines = [line.strip() for line in (args.teacher_suffix or []) if line and line.strip()]
+    teacher_suffix = "\n".join(suffix_lines)
+    teacher_system = system_text + ("\n\n" + teacher_suffix if teacher_suffix else "")
     spend = Spend(args.model, args.cap_usd)
     state = {"temperature": args.temperature, "temperature_note": None}
     stop = threading.Event()
@@ -171,7 +181,7 @@ def main():
 
     print(f"teacher {args.model} | temperature {args.temperature} | n={args.n} max_tokens={args.max_tokens} "
           f"| {len(rows)} tasks | cap ${args.cap_usd} | fact_check={args.fact_check} | "
-          f"teacher suffix: {args.teacher_suffix.strip() or '(none)'}", flush=True)
+          f"teacher suffix: {teacher_suffix or '(none)'}", flush=True)
     # One probe before the pool settles whether the model accepts a temperature at all
     # (Claude Sonnet 5 and later reject sampling parameters), so the workers never race on it.
     if state["temperature"] is not None:
@@ -203,7 +213,7 @@ def main():
     with args.out_samples.open("w") as f:
         for s in samples:
             f.write(json.dumps({**s, "model": args.model, "temperature": state["temperature"],
-                                "teacher_suffix": args.teacher_suffix.strip(), "fact_check": args.fact_check},
+                                "teacher_suffix": teacher_suffix, "fact_check": args.fact_check},
                                ensure_ascii=False) + "\n")
 
     # kept set: route == gold, at most --max-kept per task, identical completions removed
