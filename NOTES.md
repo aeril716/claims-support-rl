@@ -264,6 +264,10 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
   0/16 (all escalate). explain_waiting_period: v5 42 samples, gold hit on 3 of 5 tasks
   (16, 15, 11 of 16; t044 and t170 0/16); v8 62 samples, 4 of 5 (t022 0/16, all refer).
   Peak allocated 46.0 / 41.6 GiB; wall 138.8 / 101.8 min. Parse rate 0.991 / 0.995.
+- `eval/pass_at_k.py --adapter <ckpt>` loads a LoRA checkpoint like before_after.py (the
+  jsonl records carry `adapter`). `eval/passk_buckets.py <jsonl...>` buckets tasks by gold
+  hits (0, 1-3, 4-12, 13-15, all) and lists the 4-12 tasks; on the 14B base the mixed bucket
+  is 1 task under v5 (t069) and 6 under v8 (four explain_not_covered, t044, t174).
 
 ## Trainer and reward (uncommitted code)
 - `train/train_grpo.py`: fixed settings (see README "Training setup"); overrides `--out

@@ -3,6 +3,8 @@ among the first j of them. Route only; the judge is never called.
 
     python eval/pass_at_k.py --model Qwen/Qwen2.5-14B-Instruct --prompt-version v5 --k 16 \
         --out out/passk_base14b_v5_test3.jsonl [--greedy out/eval_base14b_v5_test3/summary.json]
+    python eval/pass_at_k.py --model Qwen/Qwen2.5-14B-Instruct --adapter <run>/checkpoint-35 \
+        --prompt-version v5 --k 16 --out out/passk_run8_ckpt35_v5_test3.jsonl
 
 One generate() call per task with num_return_sequences=k, sampling on (temperature as given,
 top_p 1.0, no top_k). If that call does not fit in GPU memory the k samples are drawn in
@@ -119,6 +121,8 @@ def main():
     parser.add_argument("--out", type=Path, required=True, help="jsonl, one line per task")
     parser.add_argument("--greedy", type=Path, default=None,
                         help="summary.json of the matching eval/before_after.py run, for the reference column")
+    parser.add_argument("--adapter", default=None,
+                        help="LoRA checkpoint directory to load on the base, as eval/before_after.py --adapter")
     parser.add_argument("--bf16", action="store_true", help="bfloat16 instead of float16 (A100/H100)")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
@@ -132,7 +136,11 @@ def main():
     dtype = torch.bfloat16 if args.bf16 and device == "cuda" else (torch.float16 if device == "cuda" else torch.float32)
     tok = AutoTokenizer.from_pretrained(args.model)
     model = AutoModelForCausalLM.from_pretrained(args.model, dtype=dtype, attn_implementation="sdpa").to(device).eval()
-    print(f"{args.model} {dtype} {device} sdpa | prompt {args.prompt_version} | k={args.k} temperature={args.temperature} "
+    if args.adapter:
+        from peft import PeftModel
+        model = PeftModel.from_pretrained(model, args.adapter).eval()
+    print(f"{args.model} {dtype} {device} sdpa" + (f" + adapter {args.adapter}" if args.adapter else "")
+          + f" | prompt {args.prompt_version} | k={args.k} temperature={args.temperature} "
           f"top_p=1.0 max_new_tokens={MAX_NEW_TOKENS} | {len(rows)} tasks", flush=True)
     if device == "cuda":
         torch.cuda.reset_peak_memory_stats()
@@ -144,8 +152,8 @@ def main():
             text = train_grpo.render_prompt(row["prompt"], tok)
             samples = sample_routes(model, tok, text, args.k, args.temperature, device)
             record = {"task_id": row["task_id"], "gold": row["route_answer"], "model": args.model,
-                      "prompt_version": args.prompt_version, "temperature": args.temperature,
-                      "samples": samples}
+                      "adapter": args.adapter, "prompt_version": args.prompt_version,
+                      "temperature": args.temperature, "samples": samples}
             handle.write(json.dumps(record) + "\n")
             handle.flush()
             records.append(record)
