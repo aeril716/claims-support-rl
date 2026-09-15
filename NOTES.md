@@ -420,6 +420,7 @@ from a checkout at or after a4d8602.
   t122 (refer), t022 (waiting), t406 t415 (tech). 10 displaced ask tasks moved to val. The
   previous test is `tasks_test_ask16.jsonl`. Sizes: train 307, val 53, test 40. Evals on it
   carry the suffix `_test3`.
+- Held-out test (2026-09-15): `tasks_test.jsonl` (40) was used for every development decision and is now the validation set; `tasks_test_v2.jsonl` (40, ids h001-h040, built hard by construction by `scripts/make_test_v2.py`, see `reports/test_v2.md`) is the held-out test, scored once at the end.
 - Prompt v8 added (18:45): v5 with (1) one derived account flag,
   manufacturer_warranty_active = enrolled < 365, rendered after enrolled_days_ago (empty
   account stays {}); (2) inside_manufacturer_warranty dropped from the answer object, the other
