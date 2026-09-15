@@ -1,0 +1,49 @@
+398 distinct existing sentences in data/v3_kb_definitions
+
+=== fill round 1: 103 new combinations ===
+attempt 1/5: 103 to write
+  REJECT c0022 [claude-sonnet-5] B_label_body peril=crack: The customer describes a line on the back of the tablet, not a cracked screen as defined by front or back glass cracked or shattered.
+  REJECT c0027 [claude-sonnet-5] B_label_body peril=theft: The customer describes losing their phone at a coffee shop and searching for it without finding it, which aligns with the definition of a lost device as they cannot find the device and there's no indication of theft.
+  REJECT c0035 [claude-sonnet-5] B_label_body peril=theft: The customer describes losing the tablet in a coffee shop after setting their bag down for a short time, which aligns with the definition of a lost device as they cannot find it and there's no indication of theft.
+  REJECT c0044 [claude-sonnet-5] B_label_body peril=environment: The customer describes screen flickering, inability to hold a charge, and random shutdowns, which are not consistent with environmental exposure like dust, heat, or humidity as defined; these issues typically indicate internal hardware or battery problems rather than environmental factors.
+  [claude-sonnet-5] reply was not valid JSON: Expecting ',' delimiter: line 1 column 2283 (char 2282). Reply began: '{"messages": [{"case": 1, "text": "Hi, so i got this watch like back in janurary for my birthday and i wear it evrynight to track my sleep and durring workouts too, its been great honestly until yeste'
+  [claude-sonnet-5] re-requesting case 1 on its own (1/3)
+  [claude-sonnet-5] re-requesting case 2 on its own (1/3)
+  [claude-sonnet-5] no JSON object in the reply. Reply began: 'Hi, so I got this phone back around Christmas time from my sister as a gift, and I use it for pretty much everything, work stuff, my kids school group chat, all that. Anyway I noticed lately the back '
+  [claude-sonnet-5] re-requesting case 2 on its own (2/3)
+  [claude-sonnet-5] re-requesting case 3 on its own (1/3)
+  [claude-sonnet-5] re-requesting case 4 on its own (1/3)
+  [claude-sonnet-5] reply was not valid JSON: Illegal trailing comma before end of object: line 1 column 689 (char 688). Reply began: '{"messages": [{"case": 1, "text": "Phone won\'t turn on. Screen was flickering yesterday, speaker stopped working too. Never dropped it, no water damage."}, {"case": 2, "text": "Tablet screen keeps fli'
+  [claude-sonnet-5] re-requesting case 1 on its own (1/3)
+  [claude-sonnet-5] re-requesting case 2 on its own (1/3)
+  [claude-sonnet-5] re-requesting case 3 on its own (1/3)
+  [claude-sonnet-5] no JSON object in the reply. Reply began: "Hi, I've had this watch since about last spring, my daughter actually got it for me as a birthday gift, and I mostly just use it for tracking my walks and checking texts when I'm out in the yard garde"
+  [claude-sonnet-5] re-requesting case 3 on its own (2/3)
+  [claude-sonnet-5] re-requesting case 4 on its own (1/3)
+  REJECT c0069 [claude-sonnet-5] A_parrot peril=malfunction: definition run: wont turn screen flickers
+  REJECT c0070 [claude-sonnet-5] A_parrot peril=malfunction: definition run: wont turn screen flickers
+  REJECT c0075 [claude-sonnet-5] B_label_body peril=surge: The customer describes a phone that stopped working after normal charging, with the charging port no longer functioning, but there is no mention of an electrical surge, storm, or any event that could cause a power surge as defined in the policy knowledge base.
+attempt 2/5: 7 to write
+  REJECT c0027 [claude-sonnet-5] B_label_body peril=theft: The customer describes leaving their phone unattended for a minute at a coffee shop, which aligns with the definition of a lost device as they cannot find it after searching.
+  REJECT c0035 [claude-sonnet-5] B_label_body peril=theft: The customer describes a situation where their daughter left the tablet on a table at the library and it was no longer there when she returned, with no one turning it in at the front desk, which aligns with the definition of a lost device as the customer cannot find the device.
+  REJECT c0069 [claude-sonnet-5] A_parrot peril=malfunction: definition run: wont turn screen flickers
+attempt 3/5: 3 to write
+  REJECT c0027 [claude-sonnet-5] B_label_body peril=theft: The customer describes losing their phone in a coffee shop, not having it taken by someone else, which aligns with the definition of a lost device.
+attempt 4/5: 1 to write
+
+wrote data/v3_kb_definitions/tasks_sft_new103.jsonl: 103 tasks
+
+| route | tasks |
+|---|---|
+| ask_question | 13 |
+| file_claim | 15 |
+| explain_not_covered | 15 |
+| escalate | 15 |
+| refer_to_manufacturer | 15 |
+| explain_waiting_period | 15 |
+| tech_support | 15 |
+
+refer_to_manufacturer at the claim limit: 6
+rejections by check: {'B_label_body': 8, 'A_parrot': 3}; combinations dropped after 5 attempts: 0
+writer claude-sonnet-5: 40 calls, 37038 input + 20802 output tokens, $0.28
+judge: 111 calls, 1.7 min; wall 6.8 min

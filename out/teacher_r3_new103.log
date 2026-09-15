@@ -1,0 +1,43 @@
+teacher claude-sonnet-5 | temperature 0.7 | n=4 max_tokens=800 | 103 tasks | cap $10.0 | fact_check=True | teacher suffix: Keep the reply to 60 words or fewer.
+claim_limit_reached is "yes" when claims_last_12m equals or exceeds the claim limit for the device type in the knowledge base; when the account is shown, answer "yes" or "no", never "unknown".
+For explain_not_covered, the reply must name the knowledge-base rule that excludes the incident and offer an alternative if one exists.
+Apply the routing rules in order. If the manufacturer warranty is still active and the failure is a defect, malfunction, or wear, route to refer_to_manufacturer even when the claim limit is reached; escalate applies only when the plan itself would cover the incident and the limit is reached.
+  model rejected temperature (Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Cf4M4NZpxyE4yo2poCKDz'}); sampled at the API default
+  60/412 calls, $0.24
+  120/412 calls, $0.47
+  180/412 calls, $0.69
+  240/412 calls, $0.91
+  300/412 calls, $1.14
+  360/412 calls, $1.36
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+teacher claude-sonnet-5; model rejected temperature (Error code: 400 - {'type': 'error', 'error': {'type': 'invalid_request_error', 'message': '`temperature` is deprecated for this model.'}, 'request_id': 'req_011Cf4M4NZpxyE4yo2poCKDz'}); sampled at the API default
+calls 412 | wall 5.8 min | tokens {'input': 64920, 'output': 102326, 'cache_write': 16920, 'cache_read': 1725840} | cost $1.54
+
+| gold route | first-sample accuracy | tasks with >=1 kept | kept samples |
+|---|---|---|---|
+| ask_question | 7/13 | 9/13 | 17 |
+| file_claim | 13/15 | 13/15 | 26 |
+| explain_not_covered | 15/15 | 10/15 | 20 |
+| escalate | 14/15 | 15/15 | 29 |
+| refer_to_manufacturer | 13/15 | 13/15 | 26 |
+| explain_waiting_period | 15/15 | 15/15 | 30 |
+| tech_support | 15/15 | 14/15 | 26 |
+| **total** | 92/103 | 89/103 | 174 |
+
+| gold route | route right, facts wrong | of route-right samples |
+|---|---|---|
+| ask_question | 3 | 32 |
+| file_claim | 0 | 50 |
+| explain_not_covered | 20 | 60 |
+| escalate | 0 | 55 |
+| refer_to_manufacturer | 2 | 52 |
+| explain_waiting_period | 0 | 60 |
+| tech_support | 10 | 60 |
+| **total** | 35 | 369 |
+mismatched fields among route-right samples: {'claim_limit_reached': 35}
+
+kept replies: mean 47 words, over 60 words: 2/174
+
+parse rate 412/412; kept completions needing fence/prose stripping: 0; mean output 248 tokens, max 360; hit max_tokens: 0
+wrote out/teacher_v8reason_train_r3_new103.jsonl and data/sft/train_v8reason_r3_new103.jsonl
