@@ -1,13 +1,21 @@
-"""Route accuracy of a policy on the held-out test split. Generation only: no reward, no judge.
+"""Route accuracy of a policy on a task file (default: the held-out test split). Generation only
+unless --score or --rescore.
 
     python eval/before_after.py --model Qwen/Qwen2.5-1.5B-Instruct --out <dir>
     python eval/before_after.py --model ollama:qwen2.5:32b-instruct --out <dir>
     python eval/before_after.py --model Qwen/Qwen2.5-7B-Instruct --adapter out/grpo_run3_full/checkpoint-320 --score --out <dir>
     python eval/before_after.py --rescore --out <dir>        # judge a saved outputs.json again, no generation
+    python eval/before_after.py --tasks data/v3_kb_definitions/tasks_test_v2.jsonl --model ... --out <dir>
 
 --rubric both (the default) scores under wording v2 and re-judges only the reworded items
 under v1, so summary.json carries rubric_v1_pass_rate_mean and rubric_v2_pass_rate_mean plus
 item_pass_v1 / item_pass_v2; rubric_pass_rate_mean and item_pass keep the primary (v2) values.
+
+Besides the older keys, summary.json carries flat keys for building tables from the files:
+route_correct (int) and n, per_route_counts (route -> [correct, total]), rubric_v2 and rubric_v1
+(mean rubric pass rate per wording version, null when that version was not scored), and
+tasks_file. route_accuracy (a fraction) and per_route (route -> {correct, total}) keep their
+format, since pass_at_k.py --greedy and the Colab notebook read them.
 
 --adapter loads a LoRA checkpoint on top of the base model (the "after"). --score also runs
 every output through reward.score, so the rubric pass rate can sit next to route accuracy;
@@ -108,6 +116,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default=None, help="policy model id (required unless --rescore)")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--tasks", type=Path, default=train_grpo.TASKS,
+                        help="task file to run on (default: data/v3_kb_definitions/tasks_test.jsonl)")
     parser.add_argument("--adapter", default=None, help="LoRA checkpoint directory to load on the base")
     parser.add_argument("--score", action="store_true", help="also grade every output with reward.score")
     parser.add_argument("--rescore", action="store_true",
@@ -127,8 +137,9 @@ def main():
     versions = ["v2", "v1"] if args.rubric == "both" else [args.rubric]
     rubric_wording.set_version(versions[0])
     args.out.mkdir(parents=True, exist_ok=True)
-    rows = train_grpo.load_tasks()
+    rows = train_grpo.load_tasks(args.tasks)
     n = len(rows)
+    print(f"tasks: {args.tasks.resolve()}   {n} rows", flush=True)
 
     if args.rescore:
         # Scoring only. The outputs and the generation summary are read back from <out>; the
@@ -159,6 +170,10 @@ def main():
                "parsed_raw": raw_ok, "parsed_after_repair": repaired_ok,
                "route_accuracy": sum(r["correct"] for r in records) / n,
                "per_route": {k: {"correct": v[0], "total": v[1]} for k, v in sorted(per_route.items())},
+               "tasks_file": str(args.tasks),
+               "route_correct": sum(r["correct"] for r in records), "n": n,
+               "per_route_counts": {k: [v[0], v[1]] for k, v in sorted(per_route.items())},
+               "rubric_v2": None, "rubric_v1": None,
                "chosen_histogram": dict(chosen_hist),
                "seconds": round(elapsed)}
     # Saved before any judge call, so a scoring failure never costs the generation.
@@ -172,7 +187,7 @@ def main():
     print(f"  chosen routes: {dict(chosen_hist)}")
 
     if args.score:
-        tasks = {t["task_id"]: t for t in (json.loads(l) for l in open(train_grpo.TASKS) if l.strip())}
+        tasks = {t["task_id"]: t for t in (json.loads(l) for l in open(args.tasks) if l.strip())}
         primary = versions[0]
         item_pass = {v: collections.defaultdict(lambda: [0, 0]) for v in versions}
         t0 = time.time()
@@ -217,6 +232,7 @@ def main():
         for v in versions:
             scored = [r[f"rubric_score_{v}"] for r in records if r.get(f"rubric_score_{v}") is not None]
             summary[f"rubric_{v}_pass_rate_mean"] = sum(scored) / len(scored) if scored else None
+            summary[f"rubric_{v}"] = summary[f"rubric_{v}_pass_rate_mean"]
             summary[f"item_pass_{v}"] = {k: {"passed": x[0], "total": x[1]} for k, x in sorted(item_pass[v].items())}
         # backwards-compatible names carry the primary version
         summary["rubric_pass_rate_mean"] = summary[f"rubric_{primary}_pass_rate_mean"]
