@@ -1,9 +1,11 @@
-"""Offline tests for the anthropic judge path: parsing of awkward replies and the guarantee
-that a scoring run never dies on a judge reply. Run with:
+"""Offline tests for the judge: parsing of awkward anthropic replies, the guarantee that a
+scoring run never dies on a judge reply, and the ollama path's retry on connection failures.
+Run with:
 
     python -m unittest reward.test_judge
 
-No network: the anthropic SDK is replaced by a stub that returns scripted replies.
+No network: the anthropic SDK is replaced by a stub that returns scripted replies, and
+urllib.request.urlopen by a fake that raises or answers from a script.
 """
 
 import importlib
@@ -117,6 +119,72 @@ class AnthropicJudgeTests(unittest.TestCase):
         failed = [i for i in detail["items"] if i["reasoning"] == "judge_parse_failure"]
         self.assertEqual(len(failed), 1)
         self.assertEqual(judge.judge_failures(), 1)
+
+
+class _Reply:
+    """What urlopen returns: a context manager with read()."""
+    def __init__(self, body):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self.body.encode()
+
+
+OLLAMA_OK = '{"thinking": "{\\"reasoning\\": \\"r\\", \\"verdict\\": \\"yes\\"}", "response": ""}'
+
+
+def ollama_judge():
+    os.environ["JUDGE_BACKEND"] = "ollama"
+    from reward import judge
+    importlib.reload(judge)
+    return judge
+
+
+class OllamaRetryTests(unittest.TestCase):
+    def test_two_connection_failures_then_success(self):
+        import urllib.error
+        from unittest import mock
+        judge = ollama_judge()
+        script = [urllib.error.URLError(ConnectionRefusedError(111, "Connection refused")),
+                  ConnectionResetError(104, "Connection reset by peer"),
+                  _Reply(OLLAMA_OK)]
+        calls = []
+
+        def fake_urlopen(request, timeout):
+            calls.append(request.full_url)
+            item = script.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        with mock.patch("urllib.request.urlopen", fake_urlopen), \
+                mock.patch.object(judge.time, "sleep") as sleep:
+            self.assertEqual(judge.ask_with_reasoning("q", CONTEXT), ("yes", "r"))
+        self.assertEqual(len(calls), 3)
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [5, 10])
+
+    def test_http_error_is_not_retried(self):
+        import urllib.error
+        from unittest import mock
+        judge = ollama_judge()
+        calls = []
+
+        def fake_urlopen(request, timeout):
+            calls.append(1)
+            raise urllib.error.HTTPError(judge.ENDPOINT, 500, "Internal Server Error", {}, None)
+
+        with mock.patch("urllib.request.urlopen", fake_urlopen), \
+                mock.patch.object(judge.time, "sleep") as sleep:
+            with self.assertRaises(urllib.error.HTTPError):
+                judge.ask_with_reasoning("q", CONTEXT)
+        self.assertEqual(len(calls), 1)
+        sleep.assert_not_called()
 
 
 class RubricWordingTests(unittest.TestCase):

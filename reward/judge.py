@@ -23,6 +23,8 @@ import os
 import re
 import sys
 import threading
+import time
+import urllib.error
 import urllib.request
 
 # Which judge answers. "ollama" is the local box used for runs 1-7; "anthropic" calls the
@@ -35,6 +37,10 @@ ENDPOINT = "http://192.168.88.59:11434/api/generate"
 MODEL = "qwen3:30b-a3b"
 KEEP_ALIVE = "30m"          # a cold load costs about 40 seconds; keep the model resident
 TIMEOUT_S = 600
+# Waits between tries when the judge box cannot be reached (connection refused or reset, DNS,
+# timeout): five retries after the first try. An HTTP error status from Ollama or a reply without
+# schema-shaped JSON is not retried; it raises as before.
+CONNECT_RETRY_DELAYS_S = (5, 10, 20, 40, 60)
 
 ANTHROPIC_MODEL = "claude-haiku-4-5"
 ANTHROPIC_MAX_TOKENS = 1024   # room for a long reasoning; a reply cut at max_tokens is retried
@@ -208,6 +214,32 @@ BATCH_SCHEMA = {
 LAST = {}
 
 
+def _is_connection_error(exc):
+    """True for failures to reach Ollama at all. HTTPError is a subclass of URLError but means
+    Ollama answered with an error status, so it is excluded."""
+    if isinstance(exc, urllib.error.HTTPError):
+        return False
+    return isinstance(exc, (urllib.error.URLError, ConnectionError, TimeoutError))
+
+
+def _post_with_retry(request):
+    """Send the request and return the reply body as text, retrying connection-level failures
+    after each wait in CONNECT_RETRY_DELAYS_S. Anything else, and the last connection failure,
+    is raised."""
+    for attempt, delay in enumerate((0,) + CONNECT_RETRY_DELAYS_S):
+        if delay:
+            time.sleep(delay)
+        try:
+            with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
+                return response.read().decode()
+        except Exception as exc:                   # noqa: BLE001  filtered just below
+            if not _is_connection_error(exc) or attempt == len(CONNECT_RETRY_DELAYS_S):
+                raise
+            print(f"[judge] connection failure ({type(exc).__name__}: {exc}); retry "
+                  f"{attempt + 1}/{len(CONNECT_RETRY_DELAYS_S)} in {CONNECT_RETRY_DELAYS_S[attempt]}s",
+                  file=sys.stderr, flush=True)
+
+
 def _call(prompt, schema, accept):
     """One judge call on the active backend. ollama: POST constrained by `schema` and return
     the first field ("thinking", then "response") whose text parses as JSON that `accept`
@@ -226,8 +258,7 @@ def _call(prompt, schema, accept):
     }).encode()
     request = urllib.request.Request(
         ENDPOINT, data=body, headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(request, timeout=TIMEOUT_S) as response:
-        data = json.loads(response.read().decode())
+    data = json.loads(_post_with_retry(request))
 
     LAST.clear()
     LAST.update({"eval_count": data.get("eval_count"),
