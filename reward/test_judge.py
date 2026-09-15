@@ -187,6 +187,34 @@ class OllamaRetryTests(unittest.TestCase):
         sleep.assert_not_called()
 
 
+class JudgeUrlTests(unittest.TestCase):
+    def tearDown(self):
+        os.environ.pop("JUDGE_URL", None)
+        from reward import judge
+        importlib.reload(judge)
+
+    def test_judge_url_overrides_the_default(self):
+        from unittest import mock
+        os.environ["JUDGE_URL"] = "http://100.64.0.9:11434/"
+        judge = ollama_judge()
+        self.assertEqual(judge.JUDGE_URL, "http://100.64.0.9:11434")
+        self.assertEqual(judge.ENDPOINT, "http://100.64.0.9:11434/api/generate")
+        seen = []
+
+        def fake_urlopen(request, timeout):
+            seen.append(request.full_url)
+            return _Reply(OLLAMA_OK)
+
+        with mock.patch("urllib.request.urlopen", fake_urlopen):
+            judge.ask_with_reasoning("q", CONTEXT)
+        self.assertEqual(seen, ["http://100.64.0.9:11434/api/generate"])
+
+    def test_unset_judge_url_keeps_the_lan_address(self):
+        os.environ.pop("JUDGE_URL", None)
+        judge = ollama_judge()
+        self.assertEqual(judge.ENDPOINT, "http://192.168.88.59:11434/api/generate")
+
+
 class RubricWordingTests(unittest.TestCase):
     def test_generator_and_scorer_wording_agree(self):
         sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "data"))

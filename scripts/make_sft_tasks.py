@@ -52,6 +52,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import components as C                       # noqa: E402
 import generate_tasks as G                   # noqa: E402
 import target_distribution as T              # noqa: E402
+from reward.judge import JUDGE_URL           # noqa: E402
 
 V3_DIR = ROOT / "data" / "v3_kb_definitions"
 OUT_FILE = V3_DIR / "tasks_sft_new103.jsonl"
@@ -154,6 +155,7 @@ def main():
     cells = ask_cells()
     seen = existing_sentences()
     print(f"{len(seen)} distinct existing sentences in {V3_DIR.relative_to(ROOT)}", flush=True)
+    print(f"writer {WRITER_MODEL} | judge URL {JUDGE_URL}", flush=True)
 
     next_candidate = 1
 

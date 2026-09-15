@@ -36,6 +36,7 @@ sys.path.insert(0, str(ROOT / "train"))
 sys.path.insert(0, str(ROOT / "data"))
 
 from reward.reward import parse_record   # noqa: E402
+from reward.judge import JUDGE_URL        # noqa: E402
 import train_grpo                          # noqa: E402
 
 MAX_NEW_TOKENS = 512     # default; --max-new-tokens overrides (768 with the reasoning field)
@@ -162,7 +163,8 @@ def main():
         model = PeftModel.from_pretrained(model, args.adapter).eval()
     print(f"{args.model} {dtype} {device} sdpa" + (f" + adapter {args.adapter}" if args.adapter else "")
           + f" | prompt {args.prompt_version}{' + reasoning' if args.reasoning else ''} | k={args.k} "
-          f"temperature={args.temperature} top_p=1.0 max_new_tokens={args.max_new_tokens} | {len(rows)} tasks", flush=True)
+          f"temperature={args.temperature} top_p=1.0 max_new_tokens={args.max_new_tokens} | {len(rows)} tasks"
+          f" | judge URL {JUDGE_URL} (route only, not called)", flush=True)
     if device == "cuda":
         torch.cuda.reset_peak_memory_stats()
 

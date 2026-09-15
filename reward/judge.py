@@ -33,7 +33,11 @@ import urllib.request
 # judged it (see judge_info()).
 BACKEND = os.environ.get("JUDGE_BACKEND", "ollama")
 
-ENDPOINT = "http://192.168.88.59:11434/api/generate"
+# Base URL of the Ollama judge box, read once at import. Unset (or empty) keeps the home-LAN
+# address; from outside the LAN set JUDGE_URL to the box's Tailscale address (see NOTES.md).
+DEFAULT_JUDGE_URL = "http://192.168.88.59:11434"
+JUDGE_URL = (os.environ.get("JUDGE_URL") or DEFAULT_JUDGE_URL).rstrip("/")
+ENDPOINT = JUDGE_URL + "/api/generate"
 MODEL = "qwen3:30b-a3b"
 KEEP_ALIVE = "30m"          # a cold load costs about 40 seconds; keep the model resident
 TIMEOUT_S = 600

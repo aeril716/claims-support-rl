@@ -12,6 +12,14 @@ stand. Nothing here is committed; last commit is 158c951 (data generator + v1/v2
   `data/judge_only` are excluded on purpose.
 - Judge box: `192.168.88.59:11434`, Ollama `qwen3:30b-a3b`, called by `reward/judge.py` with a
   `format` JSON schema. Never run the policy model there.
+  - Reachable on the home LAN at `192.168.88.59`, and from outside via its Tailscale IP. To find
+    that IP, run `tailscale status` on the GPU server. As of 2026-09-15 it is `100.103.215.119`
+    (host `fmwk-395`; its Tailscale connection goes to 192.168.88.59, and `/api/tags` returns
+    the same model list on both addresses).
+  - `reward/judge.py` reads `JUDGE_URL` (base URL, no path) once at import and falls back to
+    `http://192.168.88.59:11434` when it is unset. Away from the LAN:
+    `export JUDGE_URL=http://100.103.215.119:11434`. train_grpo.py, before_after.py,
+    pass_at_k.py and make_sft_tasks.py print the resolved URL in their startup header.
 
 ## Runs (all under `~/RL/out/` on the server; fetched copies in the session scratchpad)
 - run1 `grpo_run1`: 10-step plumbing check, 7B + LoRA, fp16, batch 2×4. Completed.

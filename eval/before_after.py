@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT / "train"))
 sys.path.insert(0, str(ROOT / "data"))
 
 from reward.reward import parse_record, score   # noqa: E402
-from reward.judge import judge_info             # noqa: E402
+from reward.judge import JUDGE_URL, judge_info  # noqa: E402
 from reward import rubric_wording               # noqa: E402
 import train_grpo                                # noqa: E402  (prompt builder and task loader)
 
@@ -121,6 +121,7 @@ def main():
                         help="rubric wording to score with: v1, v2, or both (default; scores under v2 and re-judges "
                              "only the reworded items under v1, reporting a rubric column per version)")
     args = parser.parse_args()
+    print(f"judge URL: {JUDGE_URL}", flush=True)
     train_grpo.PROMPT_VERSION = args.prompt_version
     train_grpo.REASONING = args.reasoning
     versions = ["v2", "v1"] if args.rubric == "both" else [args.rubric]

@@ -459,7 +459,7 @@ def main():
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     dtype = torch.bfloat16 if args.bf16 else torch.float16
-    print(f"policy model: {args.model}   dtype: {dtype}   judge: {J.judge_info()}", flush=True)
+    print(f"policy model: {args.model}   dtype: {dtype}   judge: {J.judge_info()}   judge URL: {J.JUDGE_URL}", flush=True)
     pad_note = "pad token present"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
