@@ -1,0 +1,328 @@
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Loading weights:   0%|          | 0/579 [00:00<?, ?it/s]Loading weights:  10%|█         | 60/579 [00:00<00:00, 576.59it/s]Loading weights:  20%|██        | 118/579 [00:00<00:00, 527.09it/s]Loading weights:  30%|██▉       | 172/579 [00:00<00:00, 509.79it/s]Loading weights:  40%|███▉      | 230/579 [00:00<00:00, 523.37it/s]Loading weights:  49%|████▉     | 283/579 [00:00<00:00, 503.68it/s]Loading weights:  58%|█████▊    | 336/579 [00:00<00:00, 511.64it/s]Loading weights:  67%|██████▋   | 388/579 [00:00<00:00, 491.60it/s]Loading weights:  77%|███████▋  | 444/579 [00:00<00:00, 494.60it/s]Loading weights:  86%|████████▌ | 496/579 [00:00<00:00, 494.80it/s]Loading weights:  94%|█████████▍| 546/579 [00:01<00:00, 495.72it/s]Loading weights: 100%|██████████| 579/579 [00:01<00:00, 510.46it/s]
+Qwen/Qwen2.5-14B-Instruct torch.float16 cuda sdpa + adapter out/sft_new103_14b | prompt v8 + reasoning | k=4 temperature=1.0 top_p=1.0 max_new_tokens=768 | 307 tasks
+  1/307 t199 ask_question             gold in 4/4
+  2/307 t200 ask_question             gold in 4/4
+  3/307 t201 ask_question             gold in 0/4   MISS
+  4/307 t202 ask_question             gold in 3/4
+  5/307 t203 ask_question             gold in 3/4
+  6/307 t205 ask_question             gold in 0/4   MISS
+  7/307 t206 ask_question             gold in 4/4
+  8/307 t207 ask_question             gold in 1/4
+  9/307 t208 ask_question             gold in 4/4
+  10/307 t209 ask_question             gold in 4/4
+  11/307 t212 ask_question             gold in 3/4
+  12/307 t213 ask_question             gold in 0/4   MISS
+  13/307 t214 ask_question             gold in 4/4
+  14/307 t215 ask_question             gold in 4/4
+  15/307 t216 ask_question             gold in 0/4   MISS
+  16/307 t218 ask_question             gold in 4/4
+  17/307 t219 ask_question             gold in 0/4   MISS
+  18/307 t220 ask_question             gold in 2/4
+  19/307 t221 ask_question             gold in 4/4
+  20/307 t224 ask_question             gold in 4/4
+  21/307 t225 ask_question             gold in 0/4   MISS
+  22/307 t226 ask_question             gold in 0/4   MISS
+  23/307 t227 ask_question             gold in 0/4   MISS
+  24/307 t228 ask_question             gold in 0/4   MISS
+  25/307 t229 ask_question             gold in 0/4   MISS
+  26/307 t230 ask_question             gold in 0/4   MISS
+  27/307 t231 ask_question             gold in 0/4   MISS
+  28/307 t232 ask_question             gold in 0/4   MISS
+  29/307 t233 ask_question             gold in 3/4
+  30/307 t234 ask_question             gold in 0/4   MISS
+  31/307 t235 ask_question             gold in 4/4
+  32/307 t236 ask_question             gold in 4/4
+  33/307 t238 ask_question             gold in 4/4
+  34/307 t239 ask_question             gold in 4/4
+  35/307 t240 ask_question             gold in 0/4   MISS
+  36/307 t241 ask_question             gold in 2/4
+  37/307 t242 ask_question             gold in 4/4
+  38/307 t243 ask_question             gold in 0/4   MISS
+  39/307 t244 ask_question             gold in 2/4
+  40/307 t245 ask_question             gold in 2/4
+  41/307 t246 ask_question             gold in 0/4   MISS
+  42/307 t247 ask_question             gold in 4/4
+  43/307 t248 ask_question             gold in 4/4
+  44/307 t250 ask_question             gold in 2/4
+  45/307 t251 ask_question             gold in 1/4
+  46/307 t252 ask_question             gold in 1/4
+  47/307 t253 ask_question             gold in 2/4
+  48/307 t254 ask_question             gold in 4/4
+  49/307 t255 ask_question             gold in 4/4
+  50/307 t257 ask_question             gold in 3/4
+  51/307 t260 ask_question             gold in 3/4
+  52/307 t261 ask_question             gold in 0/4   MISS
+  53/307 t262 ask_question             gold in 4/4
+  54/307 t263 ask_question             gold in 4/4
+  55/307 t265 ask_question             gold in 3/4
+  56/307 t266 ask_question             gold in 4/4
+  57/307 t268 ask_question             gold in 0/4   MISS
+  58/307 t269 ask_question             gold in 0/4   MISS
+  59/307 t271 ask_question             gold in 4/4
+  60/307 t272 ask_question             gold in 4/4
+  61/307 t273 ask_question             gold in 4/4
+  62/307 t276 ask_question             gold in 0/4   MISS
+  63/307 t278 ask_question             gold in 4/4
+  64/307 t281 ask_question             gold in 2/4
+  65/307 t283 ask_question             gold in 2/4
+  66/307 t284 ask_question             gold in 4/4
+  67/307 t285 ask_question             gold in 0/4   MISS
+  68/307 t286 ask_question             gold in 0/4   MISS
+  69/307 t288 ask_question             gold in 0/4   MISS
+  70/307 t289 ask_question             gold in 0/4   MISS
+  71/307 t290 ask_question             gold in 3/4
+  72/307 t291 ask_question             gold in 0/4   MISS
+  73/307 t292 ask_question             gold in 4/4
+  74/307 t293 ask_question             gold in 2/4
+  75/307 t294 ask_question             gold in 1/4
+  76/307 t295 ask_question             gold in 4/4
+  77/307 t296 ask_question             gold in 2/4
+  78/307 t297 ask_question             gold in 0/4   MISS
+  79/307 t299 ask_question             gold in 4/4
+  80/307 t303 ask_question             gold in 4/4
+  81/307 t304 ask_question             gold in 4/4
+  82/307 t305 ask_question             gold in 4/4
+  83/307 t306 ask_question             gold in 4/4
+  84/307 t307 ask_question             gold in 4/4
+  85/307 t309 ask_question             gold in 4/4
+  86/307 t311 ask_question             gold in 4/4
+  87/307 t312 ask_question             gold in 4/4
+  88/307 t314 ask_question             gold in 4/4
+  89/307 t315 ask_question             gold in 4/4
+  90/307 t316 ask_question             gold in 4/4
+  91/307 t317 ask_question             gold in 4/4
+  92/307 t318 ask_question             gold in 3/4
+  93/307 t319 ask_question             gold in 4/4
+  94/307 t320 ask_question             gold in 4/4
+  95/307 t321 ask_question             gold in 3/4
+  96/307 t322 ask_question             gold in 4/4
+  97/307 t323 ask_question             gold in 4/4
+  98/307 t324 ask_question             gold in 2/4
+  99/307 t325 ask_question             gold in 2/4
+  100/307 t326 ask_question             gold in 4/4
+  101/307 t327 ask_question             gold in 4/4
+  102/307 t328 ask_question             gold in 2/4
+  103/307 t329 ask_question             gold in 4/4
+  104/307 t330 ask_question             gold in 3/4
+  105/307 t332 ask_question             gold in 4/4
+  106/307 t333 ask_question             gold in 4/4
+  107/307 t334 ask_question             gold in 4/4
+  108/307 t335 ask_question             gold in 4/4
+  109/307 t338 ask_question             gold in 4/4
+  110/307 t340 ask_question             gold in 4/4
+  111/307 t341 ask_question             gold in 4/4
+  112/307 t342 ask_question             gold in 4/4
+  113/307 t343 ask_question             gold in 4/4
+  114/307 t344 ask_question             gold in 4/4
+  115/307 t346 ask_question             gold in 4/4
+  116/307 t347 ask_question             gold in 0/4   MISS
+  117/307 t348 ask_question             gold in 1/4
+  118/307 t349 ask_question             gold in 4/4
+  119/307 t350 ask_question             gold in 4/4
+  120/307 t351 ask_question             gold in 4/4
+  121/307 t352 ask_question             gold in 2/4
+  122/307 t353 ask_question             gold in 0/4   MISS
+  123/307 t354 ask_question             gold in 1/4
+  124/307 t356 ask_question             gold in 2/4
+  125/307 t358 ask_question             gold in 4/4
+  126/307 t359 ask_question             gold in 4/4
+  127/307 t001 escalate                 gold in 4/4
+  128/307 t014 escalate                 gold in 4/4
+  129/307 t015 escalate                 gold in 4/4
+  130/307 t016 escalate                 gold in 4/4
+  131/307 t018 escalate                 gold in 4/4
+  132/307 t020 escalate                 gold in 3/4
+  133/307 t024 escalate                 gold in 4/4
+  134/307 t029 escalate                 gold in 2/4
+  135/307 t030 escalate                 gold in 4/4
+  136/307 t033 escalate                 gold in 3/4
+  137/307 t034 escalate                 gold in 4/4
+  138/307 t035 escalate                 gold in 4/4
+  139/307 t038 escalate                 gold in 4/4
+  140/307 t041 escalate                 gold in 2/4
+  141/307 t046 escalate                 gold in 4/4
+  142/307 t048 escalate                 gold in 4/4
+  143/307 t049 escalate                 gold in 3/4
+  144/307 t050 escalate                 gold in 3/4
+  145/307 t051 escalate                 gold in 4/4
+  146/307 t052 escalate                 gold in 4/4
+  147/307 t056 escalate                 gold in 2/4
+  148/307 t058 escalate                 gold in 3/4
+  149/307 t064 escalate                 gold in 4/4
+  150/307 t068 escalate                 gold in 4/4
+  151/307 t079 escalate                 gold in 2/4
+  152/307 t082 escalate                 gold in 4/4
+  153/307 t088 escalate                 gold in 4/4
+  154/307 t091 escalate                 gold in 4/4
+  155/307 t146 explain_not_covered      gold in 4/4
+  156/307 t148 explain_not_covered      gold in 4/4
+  157/307 t149 explain_not_covered      gold in 4/4
+  158/307 t150 explain_not_covered      gold in 4/4
+  159/307 t152 explain_not_covered      gold in 4/4
+  160/307 t153 explain_not_covered      gold in 4/4
+  161/307 t155 explain_not_covered      gold in 4/4
+  162/307 t156 explain_not_covered      gold in 4/4
+  163/307 t157 explain_not_covered      gold in 4/4
+  164/307 t158 explain_not_covered      gold in 4/4
+  165/307 t159 explain_not_covered      gold in 4/4
+  166/307 t161 explain_not_covered      gold in 4/4
+  167/307 t162 explain_not_covered      gold in 4/4
+  168/307 t163 explain_not_covered      gold in 4/4
+  169/307 t164 explain_not_covered      gold in 4/4
+  170/307 t165 explain_not_covered      gold in 3/4
+  171/307 t166 explain_not_covered      gold in 4/4
+  172/307 t167 explain_not_covered      gold in 3/4
+  173/307 t175 explain_not_covered      gold in 4/4
+  174/307 t176 explain_not_covered      gold in 4/4
+  175/307 t179 explain_not_covered      gold in 4/4
+  176/307 t424 explain_not_covered      gold in 4/4
+  177/307 t425 explain_not_covered      gold in 4/4
+  178/307 t426 explain_not_covered      gold in 4/4
+  179/307 t427 explain_not_covered      gold in 4/4
+  180/307 t428 explain_not_covered      gold in 4/4
+  181/307 t429 explain_not_covered      gold in 4/4
+  182/307 t430 explain_not_covered      gold in 4/4
+  183/307 t431 explain_not_covered      gold in 4/4
+  184/307 t432 explain_not_covered      gold in 4/4
+  185/307 t433 explain_not_covered      gold in 3/4
+  186/307 t434 explain_not_covered      gold in 4/4
+  187/307 t435 explain_not_covered      gold in 3/4
+  188/307 t007 explain_waiting_period   gold in 4/4
+  189/307 t019 explain_waiting_period   gold in 4/4
+  190/307 t023 explain_waiting_period   gold in 4/4
+  191/307 t026 explain_waiting_period   gold in 3/4
+  192/307 t047 explain_waiting_period   gold in 4/4
+  193/307 t065 explain_waiting_period   gold in 4/4
+  194/307 t070 explain_waiting_period   gold in 4/4
+  195/307 t072 explain_waiting_period   gold in 4/4
+  196/307 t076 explain_waiting_period   gold in 3/4
+  197/307 t085 explain_waiting_period   gold in 3/4
+  198/307 t087 explain_waiting_period   gold in 4/4
+  199/307 t089 explain_waiting_period   gold in 4/4
+  200/307 t093 refer_to_manufacturer    gold in 4/4
+  201/307 t096 refer_to_manufacturer    gold in 4/4
+  202/307 t110 refer_to_manufacturer    gold in 3/4
+  203/307 t117 refer_to_manufacturer    gold in 4/4
+  204/307 t121 refer_to_manufacturer    gold in 3/4
+  205/307 t126 refer_to_manufacturer    gold in 4/4
+  206/307 t134 refer_to_manufacturer    gold in 3/4
+  207/307 t135 refer_to_manufacturer    gold in 4/4
+  208/307 t140 refer_to_manufacturer    gold in 0/4   MISS
+  209/307 t145 explain_not_covered      gold in 3/4
+  210/307 t151 explain_waiting_period   gold in 4/4
+  211/307 t154 explain_not_covered      gold in 4/4
+  212/307 t168 explain_not_covered      gold in 3/4
+  213/307 t002 file_claim               gold in 4/4
+  214/307 t003 file_claim               gold in 3/4
+  215/307 t004 file_claim               gold in 0/4   MISS
+  216/307 t006 file_claim               gold in 4/4
+  217/307 t008 file_claim               gold in 4/4
+  218/307 t009 file_claim               gold in 4/4
+  219/307 t010 file_claim               gold in 4/4
+  220/307 t011 file_claim               gold in 4/4
+  221/307 t012 file_claim               gold in 4/4
+  222/307 t017 file_claim               gold in 4/4
+  223/307 t021 file_claim               gold in 4/4
+  224/307 t025 file_claim               gold in 1/4
+  225/307 t027 file_claim               gold in 2/4
+  226/307 t028 file_claim               gold in 4/4
+  227/307 t031 file_claim               gold in 4/4
+  228/307 t032 file_claim               gold in 4/4
+  229/307 t036 file_claim               gold in 2/4
+  230/307 t037 file_claim               gold in 4/4
+  231/307 t039 file_claim               gold in 4/4
+  232/307 t040 file_claim               gold in 4/4
+  233/307 t042 file_claim               gold in 4/4
+  234/307 t043 file_claim               gold in 4/4
+  235/307 t045 file_claim               gold in 4/4
+  236/307 t053 file_claim               gold in 4/4
+  237/307 t054 file_claim               gold in 4/4
+  238/307 t055 file_claim               gold in 4/4
+  239/307 t057 file_claim               gold in 4/4
+  240/307 t060 file_claim               gold in 4/4
+  241/307 t061 file_claim               gold in 4/4
+  242/307 t062 file_claim               gold in 3/4
+  243/307 t063 file_claim               gold in 4/4
+  244/307 t066 file_claim               gold in 4/4
+  245/307 t067 file_claim               gold in 4/4
+  246/307 t071 file_claim               gold in 4/4
+  247/307 t073 file_claim               gold in 3/4
+  248/307 t074 file_claim               gold in 1/4
+  249/307 t075 file_claim               gold in 4/4
+  250/307 t077 file_claim               gold in 4/4
+  251/307 t078 file_claim               gold in 3/4
+  252/307 t080 file_claim               gold in 4/4
+  253/307 t081 file_claim               gold in 4/4
+  254/307 t083 file_claim               gold in 3/4
+  255/307 t084 file_claim               gold in 0/4   MISS
+  256/307 t086 file_claim               gold in 4/4
+  257/307 t090 file_claim               gold in 4/4
+  258/307 t094 refer_to_manufacturer    gold in 4/4
+  259/307 t095 refer_to_manufacturer    gold in 4/4
+  260/307 t097 refer_to_manufacturer    gold in 4/4
+  261/307 t098 refer_to_manufacturer    gold in 4/4
+  262/307 t101 refer_to_manufacturer    gold in 4/4
+  263/307 t102 refer_to_manufacturer    gold in 4/4
+  264/307 t103 refer_to_manufacturer    gold in 4/4
+  265/307 t104 refer_to_manufacturer    gold in 4/4
+  266/307 t106 refer_to_manufacturer    gold in 4/4
+  267/307 t107 refer_to_manufacturer    gold in 4/4
+  268/307 t109 refer_to_manufacturer    gold in 4/4
+  269/307 t114 refer_to_manufacturer    gold in 4/4
+  270/307 t115 refer_to_manufacturer    gold in 4/4
+  271/307 t123 refer_to_manufacturer    gold in 4/4
+  272/307 t124 refer_to_manufacturer    gold in 4/4
+  273/307 t125 refer_to_manufacturer    gold in 4/4
+  274/307 t127 refer_to_manufacturer    gold in 4/4
+  275/307 t129 refer_to_manufacturer    gold in 3/4
+  276/307 t131 refer_to_manufacturer    gold in 4/4
+  277/307 t132 refer_to_manufacturer    gold in 4/4
+  278/307 t136 refer_to_manufacturer    gold in 3/4
+  279/307 t182 tech_support             gold in 4/4
+  280/307 t183 tech_support             gold in 4/4
+  281/307 t184 tech_support             gold in 4/4
+  282/307 t185 tech_support             gold in 4/4
+  283/307 t186 tech_support             gold in 4/4
+  284/307 t187 tech_support             gold in 4/4
+  285/307 t188 tech_support             gold in 4/4
+  286/307 t190 tech_support             gold in 4/4
+  287/307 t191 tech_support             gold in 3/4
+  288/307 t192 tech_support             gold in 4/4
+  289/307 t193 tech_support             gold in 4/4
+  290/307 t194 tech_support             gold in 4/4
+  291/307 t197 tech_support             gold in 4/4
+  292/307 t198 tech_support             gold in 4/4
+  293/307 t401 tech_support             gold in 3/4
+  294/307 t402 tech_support             gold in 4/4
+  295/307 t403 tech_support             gold in 4/4
+  296/307 t404 tech_support             gold in 4/4
+  297/307 t405 tech_support             gold in 4/4
+  298/307 t407 tech_support             gold in 4/4
+  299/307 t408 tech_support             gold in 4/4
+  300/307 t409 tech_support             gold in 4/4
+  301/307 t410 tech_support             gold in 4/4
+  302/307 t411 tech_support             gold in 4/4
+  303/307 t412 tech_support             gold in 3/4
+  304/307 t413 tech_support             gold in 3/4
+  305/307 t414 tech_support             gold in 4/4
+  306/307 t380 ask_question             gold in 4/4
+  307/307 t379 ask_question             gold in 4/4
+
+| gold route | n | pass@1 | pass@2 | pass@4 |
+|---|---|---|---|---|
+| ask_question | 128 | 85/128 | 91/128 | 99/128 |
+| file_claim | 45 | 38/45 | 41/45 | 43/45 |
+| explain_not_covered | 36 | 34/36 | 36/36 | 36/36 |
+| escalate | 28 | 24/28 | 28/28 | 28/28 |
+| refer_to_manufacturer | 30 | 29/30 | 29/30 | 29/30 |
+| explain_waiting_period | 13 | 12/13 | 13/13 | 13/13 |
+| tech_support | 27 | 27/27 | 27/27 | 27/27 |
+| total | 307 | 249/307 | 265/307 | 275/307 |
+
+parse rate: 1218/1228 samples carried a route (0.992)
+routes sampled overall: {'ask_question': 337, 'refer_to_manufacturer': 216, 'file_claim': 186, 'escalate': 154, 'explain_not_covered': 145, 'tech_support': 119, 'explain_waiting_period': 60, 'None': 10, 'refer_to_customer_service': 1}
+completion length: mean 159.3 tokens, max 356; 0/1228 hit the 768-token cap
+peak allocated 42.37 GiB
+wall 278.9 min for 307 tasks x 4 samples; 4 sequences per generate() call
+first-sample accuracy 249/307; tasks with at least one right and one wrong sample: 68/307
