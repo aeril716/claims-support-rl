@@ -1,19 +1,36 @@
 """Bucket the tasks of a pass@k jsonl (from eval/pass_at_k.py) by how many of the k samples hit
-the gold route: 0, 1-3, 4-12, 13-15, all k. The middle bucket is where a GRPO group has both
-correct and incorrect completions, so those tasks are listed with their gold route.
+the gold route: none, low, mid, high, all k. The edges scale with k: q = ceil(k/4), low is
+1..q-1, mid is q..k-q, high is k-q+1..k-1, and an empty range is left out. k=16 gives
+0 / 1-3 / 4-12 / 13-15 / 16; k=8 gives 0 / 1 / 2-6 / 7 / 8; k=4 gives 0 / 1-3 / 4. The mid
+bucket is where a GRPO group has both correct and incorrect completions, so those tasks are
+listed with their gold route.
 
     python eval/passk_buckets.py out/passk_base14b_v5_test3.jsonl [more.jsonl ...]
 """
 
 import collections
 import json
+import math
 import sys
 from pathlib import Path
 
 
+def span_label(lo, hi):
+    return str(lo) if lo == hi else f"{lo}-{hi}"
+
+
+def mid_range(k):
+    """The inclusive (lo, hi) of the mid bucket."""
+    q = math.ceil(k / 4)
+    return q, k - q
+
+
 def buckets_for(k):
-    """(label, lo, hi) inclusive ranges, scaled from the 16-sample cut points."""
-    return [("0", 0, 0), ("1-3", 1, 3), ("4-12", 4, 12), ("13-15", 13, k - 1), (f"{k}/{k}", k, k)]
+    """(label, lo, hi) inclusive ranges that do not overlap and cover 0..k."""
+    lo, hi = mid_range(k)
+    ranges = [(0, 0), (1, lo - 1), (lo, hi), (hi + 1, k - 1)]
+    out = [(span_label(a, b), a, b) for a, b in ranges if a <= b]
+    return out + [(f"{k}/{k}", k, k)]
 
 
 def report(path):
@@ -30,13 +47,14 @@ def report(path):
         ids = [t for t, h in hits.items() if lo <= h <= hi]
         by_route = collections.Counter(gold[t] for t in ids)
         print(f"| {label} | {len(ids)} | " + ", ".join(f"{r} {n}" for r, n in by_route.most_common()) + " |")
-    middle = [t for t, h in hits.items() if 4 <= h <= 12]
+    lo, hi = mid_range(k)
+    middle = [t for t, h in hits.items() if lo <= h <= hi]
     if middle:
-        print("\n4-12 (mixed groups):")
+        print(f"\n{span_label(lo, hi)} (mixed groups):")
         for t in sorted(middle, key=lambda t: (gold[t], t)):
             print(f"  {t}  {gold[t]:<24} {hits[t]}/{k}")
     else:
-        print("\n4-12: none")
+        print(f"\n{span_label(lo, hi)}: none")
 
 
 def main():
