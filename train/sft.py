@@ -2,6 +2,7 @@
 
     nohup .venv/bin/python train/sft.py > out/sft_r3_14b.log 2>&1 &    # GPU server (sm_75)
     python train/sft.py --bf16                                          # Colab A100
+    python train/sft.py --data data/sft/train_v8reason_r3_new103.jsonl --out out/sft_r3_new103_14b
 
 Policy: Qwen2.5-14B-Instruct with a LoRA adapter (r=16, same seven projection modules as
 train/train_grpo.py). The GPU is a Quadro RTX 8000 (compute capability 7.5), which has no
@@ -10,14 +11,16 @@ With --bf16 (for GPUs that have it, such as the Colab A100) the base is loaded i
 instead and training uses bf16 mixed precision, which needs no grad scaler. Every other
 setting is the same in both modes.
 
-Data: data/sft/train_v8reason_r3.jsonl (teacher samples, already filtered to the gold route).
-The training set is built in two steps:
+Data: --data, default data/sft/train_v8reason_r3.jsonl (teacher samples, already filtered to the
+gold route). The training set is built in two steps:
   1. at most 2 samples per task; the second is one whose "reasoning" text differs from the
      first when such a sample exists
   2. at most 50 samples per gold route; every task's first sample is taken before any task's
      second sample, so the cap drops second samples before it drops tasks
 The per-route counts are printed before training, and the samples used are written to
-data/sft/used_r3.jsonl. Gold routes come from data/v3_kb_definitions/tasks_train.jsonl.
+data/sft/used_<name>.jsonl, where <name> is the data file name without "train_v8reason_" (so
+used_r3.jsonl for the default, used_r3_new103.jsonl for the new103 file). Gold routes come from
+data/v3_kb_definitions/tasks_train.jsonl and tasks_sft_new103.jsonl (t- and s-ids).
 
 Loss is computed on the completion tokens only: prompt tokens get label -100, which the loss
 ignores. The completion is followed by <|im_end|> so the model learns where to stop.
@@ -26,7 +29,7 @@ Out-of-memory fallback: training runs in a child process. If the fp16 (or bf16) 
 out of GPU memory it exits with code 3, and the parent starts a second child that loads the base
 in 4-bit (QLoRA) with the same LoRA settings. A fresh process guarantees the GPU is empty.
 
-Output: the adapter in out/sft_r3_14b/, plus run_stats.json there (mode, peak VRAM, wall time,
+Output: --out, default out/sft_r3_14b/: the adapter plus run_stats.json (mode, peak VRAM, wall time,
 loss at every step).
 """
 
@@ -41,10 +44,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 MODEL = "Qwen/Qwen2.5-14B-Instruct"
-SFT_DATA = ROOT / "data" / "sft" / "train_v8reason_r3.jsonl"
-TASKS = ROOT / "data" / "v3_kb_definitions" / "tasks_train.jsonl"
-USED = ROOT / "data" / "sft" / "used_r3.jsonl"
-OUT = ROOT / "out" / "sft_r3_14b"
+TASK_FILES = [ROOT / "data" / "v3_kb_definitions" / "tasks_train.jsonl",
+              ROOT / "data" / "v3_kb_definitions" / "tasks_sft_new103.jsonl"]
+DEFAULT_DATA = ROOT / "data" / "sft" / "train_v8reason_r3.jsonl"
+DEFAULT_OUT = ROOT / "out" / "sft_r3_14b"
+
+# Set from --data and --out in main(), in the parent and in every child.
+SFT_DATA = DEFAULT_DATA
+USED = None
+OUT = DEFAULT_OUT
 
 PER_TASK = 2
 PER_ROUTE = 50
@@ -53,12 +61,21 @@ OOM_EXIT = 3
 TARGET_MODULES = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
 
 
+def used_path(data):
+    """data/sft/train_v8reason_r3.jsonl -> data/sft/used_r3.jsonl"""
+    return ROOT / "data" / "sft" / ("used_" + data.stem.removeprefix("train_v8reason_") + ".jsonl")
+
+
 def build_training_set():
     """Pick the samples to train on and write them to USED. Returns the per-route counts."""
     gold = {}
-    for line in open(TASKS):
-        row = json.loads(line)
-        gold[row["task_id"]] = row["route_answer"]
+    for path in TASK_FILES:
+        if not path.exists():
+            continue
+        for line in open(path):
+            row = json.loads(line)
+            assert row["task_id"] not in gold, f"task id {row['task_id']} appears in two task files"
+            gold[row["task_id"]] = row["route_answer"]
 
     by_task = collections.OrderedDict()
     mismatched = 0
@@ -110,6 +127,7 @@ def build_training_set():
     for route in sorted(counts):
         print(f"| {route} | {counts[route]} | {len(tasks_used[route])} |")
     print(f"| total | {sum(counts.values())} | {len({u['task_id'] for u in used})} |")
+    print(f"rows after the per-task and per-route caps: {len(used)}")
     print(f"written: {USED}", flush=True)
     return counts
 
@@ -221,20 +239,27 @@ def main():
     parser.add_argument("--child", choices=["fp16", "bf16", "qlora"])
     parser.add_argument("--bf16", action="store_true",
                         help="load and train in bfloat16 (A100 and newer) instead of fp16")
+    parser.add_argument("--data", type=Path, default=DEFAULT_DATA, help="teacher SFT samples (jsonl)")
+    parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="directory for the adapter")
     args = parser.parse_args()
+    global SFT_DATA, USED, OUT
+    SFT_DATA, OUT = args.data.resolve(), args.out.resolve()
+    USED = used_path(SFT_DATA)
     if args.child:
         child(args.child, args.bf16 or args.child == "bf16")
         return
 
+    print(f"data: {SFT_DATA}\nused samples: {USED}\noutput dir: {OUT}", flush=True)
     start = time.time()
     OUT.mkdir(parents=True, exist_ok=True)
     build_training_set()
 
     code = None
-    precision = ["--bf16"] if args.bf16 else []
+    child_args = ["--bf16"] if args.bf16 else []
+    child_args += ["--data", str(SFT_DATA), "--out", str(OUT)]
     for mode in ("bf16" if args.bf16 else "fp16", "qlora"):
         print(f"=== starting {mode} run ===", flush=True)
-        code = subprocess.call([sys.executable, __file__, "--child", mode] + precision)
+        code = subprocess.call([sys.executable, __file__, "--child", mode] + child_args)
         if code != OOM_EXIT:
             break
         print(f"=== {mode} ran out of GPU memory; falling back ===", flush=True)
