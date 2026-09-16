@@ -511,7 +511,8 @@ support-rl-env/
     reward.py            combines both into one number
   train/
     train_grpo.py        training script imported by the Colab notebook
-    grpo_colab.ipynb
+  notebooks/
+    grpo_colab.ipynb     the Colab notebook as actually run, outputs included (see below)
   eval/
     before_after.py      score base vs trained model on held-out tasks
   results/
@@ -519,6 +520,14 @@ support-rl-env/
 ```
 
 `README.md` and `results/reward_hacks.md` are the files a reviewer will actually read.
+
+`notebooks/grpo_colab.ipynb` is the record of what was actually run on Colab. Its cells and their
+outputs are the run settings and the numbers they produced, so it is committed with outputs kept
+(only outputs that showed a credential are stripped). Google Drive holds what those runs wrote,
+the adapters and the eval outputs; the repo does not. Work on the notebook from Drive: open it
+there, or after opening it from GitHub use File > Save a copy in Drive before running anything.
+A notebook opened straight from GitHub does not autosave, so its edits and outputs are lost with
+the runtime.
 
 ## Lessons learned
 

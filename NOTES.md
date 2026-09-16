@@ -388,6 +388,91 @@ from a checkout at or after a4d8602.
   `eval/passk_buckets.py` output for that file.
 - run9 adapter pass@k on sub35: pending (checkpoint run not finished).
 
+## Colab notebook and run settings (2026-09-15, from notebooks/grpo_colab.ipynb)
+`notebooks/grpo_colab.ipynb` is the notebook as last saved from Colab (2026-09-14 22:37, 53 cells,
+31 with outputs), committed with outputs; it replaces the 17-cell `train/grpo_colab.ipynb`
+(16 of whose cells it contains). Everything below is read off its cells, not from memory.
+`DRIVE` in every command is `/content/drive/MyDrive/claims-support-rl`. Runtime: A100 80GB
+(cell 1 output: torch 2.11.0+cu128, transformers 5.17.0, trl 1.13.0, peft 0.20.0, anthropic 1.4.0,
+torchao uninstalled). Judge: `JUDGE_BACKEND=anthropic` (`claude-haiku-4-5`), key from the Colab
+secret `ANTHROPIC_API_KEY` (cell 5, `userdata.get`; never written in a cell). Cell 5's saved
+output is a stale `ModuleNotFoundError: No module named 'reward'` from a run before the clone
+cell. Two things the notebook cannot settle: the run8/run9 cells (7-16) have no saved outputs,
+and Colab truncated the two saved training logs to their last 5,000 lines, so their startup
+headers are gone and only the `DONE` line and the last steps remain.
+
+- **run8** (cell 9, prompt v5, relabeled sub35):
+  ```
+  %env JUDGE_BACKEND=anthropic
+  python train/train_grpo.py --model Qwen/Qwen2.5-14B-Instruct --bf16 --prompt-version v5 \
+      --out "$DRIVE/grpo_run8_14b_v5" --batch 2 --accum 4 --gens 8 --beta 0 --steps 35 --save-steps 35 --seed 42 \
+      --tasks data/v3_kb_definitions/tasks_train_sub35.jsonl
+  ```
+  Commit: the clone cell before it (cell 3) checks out `404dd6c` and its saved output confirms
+  that checkout; the markdown above it (cell 2) still says `a4d860268b35`. The run cell itself
+  has no saved output, so which of the two it actually ran at is not in the notebook (the
+  "Colab runs 8 and 9" section above says at or after a4d8602). Adapter:
+  `$DRIVE/grpo_run8_14b_v5/checkpoint-35`. Eval cells: 7 (base, v5, `--score`, out
+  `eval_base14b_v5_test3`), 11 (`--adapter .../checkpoint-35`, out `eval_run8_ckpt35_v5_test3`),
+  12 (`table()` over the two summary.json files). None of the three has a saved output.
+- **run9** (cell 15, prompt v8, relabeled sub35): identical to run8 with `--prompt-version v8`
+  and `--out "$DRIVE/grpo_run9_14b_v8"`. Same commit situation as run8. Adapter:
+  `$DRIVE/grpo_run9_14b_v8/checkpoint-35`. Eval cells: 14 (base v8, out `eval_base14b_v8_test3`),
+  16 (adapter, out `eval_run9_ckpt35_v8_test3`, then `table()`), both without saved output;
+  22 (`pass_at_k.py --prompt-version v8 --tasks tasks_train_sub35.jsonl --k 16 --temperature 1.0
+  --adapter .../checkpoint-35 --out passk_run9_v8_sub35.jsonl`, at `d62b3cb` per cell 20's
+  output) with output: pass@1 19/35, pass@16 25/35 (base, cell 19 at 404dd6c: 19/35 and 23/35);
+  23 (`passk_buckets.py` on both files) with output: 0/16 bucket 12 tasks base, 10 run9.
+- **run10** (cell 31, prompt v8 + reasoning, mixed-103), at `fc1c233` (cell 29 output):
+  ```
+  %env JUDGE_BACKEND=anthropic
+  python train/train_grpo.py --model Qwen/Qwen2.5-14B-Instruct --bf16 --prompt-version v8 --reasoning \
+      --out "$DRIVE/grpo_run10_14b_v8reason" --batch 2 --accum 4 --gens 8 --beta 0 --steps 52 --save-steps 52 --seed 42 \
+      --tasks data/v3_kb_definitions/tasks_train_mixed.jsonl
+  ```
+  Training set: cell 30 builds `tasks_train_mixed.jsonl` (103 tasks: ask 41, escalate 6,
+  not_covered 11, waiting 8, file 14, refer 13, tech 10) from `student_v8reason_train_k4.jsonl`,
+  which cell 26 sampled at `c5d734c` (`pass_at_k.py --reasoning --tasks tasks_train.jsonl --k 4
+  --temperature 1.0 --save-raw --max-new-tokens 768`; 179/307 first-sample, 103 mixed, 55.6 min).
+  Saved log tail: 52/52 steps, `DONE wall 53.0 min | peak GPU 37.22 GiB | generate 22.8 min |
+  judge 54.8 min (2863 calls) | completions 416`. Adapter: `$DRIVE/grpo_run10_14b_v8reason/checkpoint-52`.
+  Eval cells, all with saved output: 32 and 34 (same command, `before_after.py --prompt-version v8
+  --reasoning --score --adapter .../checkpoint-52 --out eval_run10_ckpt52_v8reason_test3`, checkout
+  `c3961e8`): route 35/40 (ask 6/6, escalate 4/6, not_covered 5/6, waiting 5/5, file 6/6, refer 4/6,
+  tech 5/5), rubric v2 0.832 / v1 0.822 (cell 34 rerun 0.833 / 0.822); 33 (base, same prompt, out
+  `eval_base14b_v8reason_test3`): 35/40, rubric v2 0.847 / v1 0.833; 35 (pass@4 on mixed-103 with
+  the adapter, out `passk_run10_v8reason_mixed_k4.jsonl`): 64/103 pass@1, 90/103 pass@4, 57/103
+  still mixed; 36 (pass@16 on test 40, out `passk_run10_v8reason_test3.jsonl`): 34/40 pass@1,
+  36/40 pass@16. Cell 27 (base pass@16 on test 40 with reasoning, `passk_base14b_v8reason_test3.jsonl`):
+  33/40 pass@1, 37/40 pass@16.
+- **run11** (cell 48, SFT init + RL, mixed-103), commit: the clone cell before it (cell 44) checks
+  out `40c7718` and cells 45, 46 and 49 print that same checkout; cell 48 has no checkout line of
+  its own.
+  ```
+  %env JUDGE_BACKEND=anthropic
+  test -f data/v3_kb_definitions/tasks_train_mixed.jsonl || cp "$DRIVE/tasks_train_mixed.jsonl" data/v3_kb_definitions/
+  python train/train_grpo.py --model Qwen/Qwen2.5-14B-Instruct --bf16 --prompt-version v8 --reasoning \
+      --init-adapter "$DRIVE/sft_new103_14b" \
+      --out "$DRIVE/grpo_run11_14b_sft_new103" --batch 2 --accum 4 --gens 8 --beta 0 --steps 52 --save-steps 52 --seed 42 \
+      --tasks data/v3_kb_definitions/tasks_train_mixed.jsonl
+  ```
+  Init adapter: cell 45, `python train/sft.py --bf16 --data data/sft/train_v8reason_r3_new103.jsonl
+  --out "$DRIVE/sft_new103_14b"` (174 examples after the caps, 66 optimizer steps, train_loss
+  0.5439, 970 s, peak allocated 35.21 GiB). Saved log tail: 52/52, `DONE wall 53.2 min | peak GPU
+  37.36 GiB | generate 23.3 min | judge 53.1 min (2856 calls) | completions 416`. Adapter:
+  `$DRIVE/grpo_run11_14b_sft_new103/checkpoint-52`. Eval cells, all with saved output: 49
+  (`before_after.py --prompt-version v8 --reasoning --score --adapter .../checkpoint-52 --out
+  eval_run11_ckpt52_v8reason_test3`): route 40/40, rubric v2 0.915 / v1 0.888; 51 (pass@16 on
+  test 40, `passk_run11_v8reason_test3.jsonl`): 40/40 at every k, 632/640 parsed. SFT-only
+  comparison: 46 (`--adapter sft_new103_14b`, out `eval_sft_new103_v8reason_test3`): 40/40,
+  rubric v2 0.912 / v1 0.888; 50 (pass@16, `passk_sft_new103_v8reason_test3.jsonl`): 37/40
+  pass@1, 40/40 from pass@2. Cell 41's Drive listing (run before cell 48) shows a folder
+  `grpo_run11_14b_v8reason_sft` that no cell in the notebook writes, so an earlier run11 attempt
+  under that name existed on Drive and is not recorded here.
+- Other cells with saved output: 39 (`sft_r3_14b`, trained on the server, evaluated at `a599b60`:
+  38/40, rubric v2 0.936 / v1 0.917), 42 (per-task check of that eval: t130 file_claim ->
+  explain_not_covered, t137 escalate right, t143 refer right, t144 refer -> escalate).
+
 ## Label fix and split rebuild (2026-09-13 17:15)
 - `route_answer` in data/generate_tasks.py reordered: ask_question -> explain_not_covered ->
   tech_support -> refer_to_manufacturer -> escalate -> explain_waiting_period -> file_claim.
