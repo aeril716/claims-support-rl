@@ -1,12 +1,29 @@
 # claims-support-rl
 
-## What this is
+This project trains an open model (Qwen2.5-14B-Instruct) to handle one turn of a
+device-insurance support chat. The model reads a customer message, picks one of
+seven routes (for example: file a claim, ask for missing information, or send the
+customer to the manufacturer), and writes a reply. The reward checks the route
+with code and the reply with an LLM judge.
 
-A small RL environment that trains a support agent to route and answer device-insurance
-messages. The agent reads one customer message, decides how the case should be routed, and
-writes one reply. A per-task rubric of atomic pass/fail checks is the reward function.
+I compared four setups on a held-out test set of 40 tasks: the base model,
+RL only (GRPO), SFT only, and SFT followed by RL.
 
-The design lives in [CLAUDE.md](CLAUDE.md).
+## Key findings
+
+- SFT moved the model the most. Route accuracy went from 23/40 (base) to 35/40.
+- RL on top of SFT added a little more: 36/40. The average over 16 samples per
+  task went from 526/640 to 557/640 (noise is about ±10).
+- RL did not raise the ceiling. Pass@16 (at least one correct answer in 16 tries)
+  stayed at 38/40 for both SFT and SFT+RL. RL made correct answers more likely.
+  It did not make new ones possible.
+- RL alone did almost nothing: 24/40 against the base model's 23/40. A follow-up
+  run (RL from the base model, on the same training set as SFT+RL) also stayed
+  at 23-24/40. So the gain came from starting at the SFT model, not from the
+  training set.
+- RL only learns from tasks where the model is sometimes right and sometimes
+  wrong. If all samples for a task get the same reward, there is nothing to learn.
+  After SFT, the old RL training set was already solved, so it had to be chosen again.
 
 ## Data
 
